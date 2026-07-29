@@ -1,0 +1,230 @@
+// Prisma schema for 三角洲行动战队赛事报名网站
+// 数据库：SQLite
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // Neon 等 Serverless Postgres 使用连接池时建议开启 PgBouncer 模式
+  // 在 DATABASE_URL 中加 ?pgbouncer=true&connect_timeout=15
+}
+
+// ============ 用户与权限 ============
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique // 完整用户名 MMR丨{nickname}
+  nickname     String // 昵称部分（不含前缀）
+  passwordHash String
+  role         Role     @default(MEMBER)
+  disabled     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  registrations      Registration[]
+  announcementReads  AnnouncementRead[]
+  comments           AnnouncementComment[]
+  announcements      Announcement[]
+  events             Event[]
+  invitationCodes    InvitationCode[]
+
+  abilities  UserAbility[]
+  duties     UserDuty[]
+  operators  UserOperator[]
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+// ============ 能力 / 职责 / 干员 ============
+
+model Ability {
+  id        String         @id @default(cuid())
+  name      String
+  category  AbilityCategory
+  sortOrder Int            @default(0)
+  users     UserAbility[]
+  @@unique([name, category])
+}
+
+enum AbilityCategory {
+  INFANTRY
+  VEHICLE
+}
+
+model UserAbility {
+  userId    String
+  abilityId String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ability   Ability @relation(fields: [abilityId], references: [id], onDelete: Cascade)
+  @@id([userId, abilityId])
+}
+
+model Duty {
+  id        String     @id @default(cuid())
+  name      String     @unique // 队长 / 指挥 / 无
+  sortOrder Int        @default(0)
+  users     UserDuty[]
+}
+
+model UserDuty {
+  userId String
+  dutyId String
+  user   User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  duty   Duty  @relation(fields: [dutyId], references: [id], onDelete: Cascade)
+  @@id([userId, dutyId])
+}
+
+model Operator {
+  id        String         @id @default(cuid())
+  name      String         @unique
+  faction   String? // 阵营（可选，用于分组展示）
+  sortOrder Int            @default(0)
+  users     UserOperator[]
+}
+
+model UserOperator {
+  userId     String
+  operatorId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  operator   Operator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+  @@id([userId, operatorId])
+}
+
+// ============ 标签（赛事性质 / 赛事名称 / 分队性质）============
+
+model EventNature {
+  id        String   @id @default(cuid())
+  name      String   @unique // 正赛 / 训练赛 / 娱乐赛 / 其他
+  sortOrder Int      @default(0)
+  events    Event[]
+}
+
+model EventName {
+  id        String   @id @default(cuid())
+  name      String   @unique // 百姓杯等
+  sortOrder Int      @default(0)
+  events    Event[]
+}
+
+model SquadNature {
+  id        String   @id @default(cuid())
+  name      String   @unique // 步兵 / 载具 / 机动 / 指挥
+  sortOrder Int      @default(0)
+  squads    Squad[]
+}
+
+// ============ 邀请码 ============
+
+model InvitationCode {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  maxUses     Int
+  usedCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+}
+
+// ============ 公告 ============
+
+model Announcement {
+  id              String   @id @default(cuid())
+  title           String
+  contentMarkdown String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  authorId        String
+  author          User     @relation(fields: [authorId], references: [id])
+  images          AnnouncementImage[]
+  reads           AnnouncementRead[]
+  comments        AnnouncementComment[]
+}
+
+model AnnouncementImage {
+  id             String   @id @default(cuid())
+  announcementId String
+  path           String // 上传图片的相对路径
+  sortOrder      Int      @default(0)
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+}
+
+model AnnouncementRead {
+  userId         String
+  announcementId String
+  readAt         DateTime  @default(now())
+  confirmedAt    DateTime?
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  @@id([userId, announcementId])
+}
+
+model AnnouncementComment {
+  id             String   @id @default(cuid())
+  announcementId String
+  userId         String
+  content        String
+  createdAt      DateTime @default(now())
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============ 赛事 / 分队 / 报名 ============
+
+model Event {
+  id            String      @id @default(cuid())
+  title         String // 冗余字段，由 name + nature + 时间组合生成，便于显示
+  eventTime     DateTime
+  natureId      String
+  nameId        String
+  requiredCount Int
+  status        EventStatus @default(UPCOMING)
+  createdAt     DateTime    @default(now())
+  createdById   String
+  createdBy     User        @relation(fields: [createdById], references: [id])
+  nature        EventNature @relation(fields: [natureId], references: [id])
+  name          EventName   @relation(fields: [nameId], references: [id])
+  squads        Squad[]
+  registrations Registration[]
+}
+
+enum EventStatus {
+  UPCOMING
+  ARCHIVED
+}
+
+model Squad {
+  id           String         @id @default(cuid())
+  eventId      String
+  natureId     String
+  index        Int // 队伍序号（1, 2, 3...）
+  capacity     Int            @default(4)
+  event        Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  nature       SquadNature    @relation(fields: [natureId], references: [id])
+  registrations Registration[]
+  @@unique([eventId, index])
+}
+
+model Registration {
+  id           String    @id @default(cuid())
+  eventId      String
+  userId       String
+  squadId      String? // null = 替补
+  isSubstitute Boolean   @default(false)
+  status       RegStatus @default(REGISTERED)
+  createdAt    DateTime  @default(now())
+  event        Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  squad        Squad?    @relation(fields: [squadId], references: [id], onDelete: SetNull)
+  @@unique([eventId, userId, status])
+}
+
+enum RegStatus {
+  REGISTERED
+  CANCELLED
+}

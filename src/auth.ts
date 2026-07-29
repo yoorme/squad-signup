@@ -1,0 +1,70 @@
+import NextAuth, { type NextAuthConfig } from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+import bcrypt from "bcryptjs";
+import { prisma } from "@/lib/prisma";
+import { buildUsername } from "@/lib/constants";
+
+export const authConfig: NextAuthConfig = {
+  session: { strategy: "jwt" },
+  providers: [
+    Credentials({
+      credentials: {
+        username: {},
+        password: {},
+      },
+      async authorize(credentials) {
+        const username = String(credentials?.username ?? "").trim();
+        const password = String(credentials?.password ?? "");
+        if (!username || !password) return null;
+
+        // 兼容用户输入「昵称」或「MMR丨昵称」
+        const fullUsername = username.startsWith("MMR丨")
+          ? username
+          : buildUsername(username);
+
+        const user = await prisma.user.findUnique({
+          where: { username: fullUsername },
+        });
+
+        if (!user) return null;
+        if (user.disabled) return null;
+        if (!user.passwordHash) return null;
+
+        const ok = await bcrypt.compare(password, user.passwordHash);
+        if (!ok) return null;
+
+        return {
+          id: user.id,
+          name: user.username,
+          email: null,
+          role: user.role,
+          nickname: user.nickname,
+        } as any;
+      },
+    }),
+  ],
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = (user as any).id;
+        token.role = (user as any).role;
+        token.nickname = (user as any).nickname;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (session.user) {
+        (session.user as any).id = token.id;
+        (session.user as any).role = token.role;
+        (session.user as any).nickname = token.nickname;
+        session.user.name = token.name ?? session.user.name;
+      }
+      return session;
+    },
+  },
+  pages: {
+    signIn: "/login",
+  },
+};
+
+export const { auth, handlers, signIn, signOut } = NextAuth(authConfig);

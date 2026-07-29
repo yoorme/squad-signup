@@ -1,0 +1,55 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# IDE / agent 工具私有配置（不应进生产仓库）
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+
+# vercel
+.vercel
+
+# prisma 本地数据库文件（生产用远程 Postgres，不应提交本地 db）
+*.db
+*.db-journal
+prisma/dev.db*
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+/src/generated/prisma
