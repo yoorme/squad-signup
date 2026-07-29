@@ -6,10 +6,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-  // Neon 等 Serverless Postgres 使用连接池时建议开启 PgBouncer 模式
-  // 在 DATABASE_URL 中加 ?pgbouncer=true&connect_timeout=15
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")        // 运行时用：Neon pooled 连接串（带 pgbouncer=true）
+  directUrl = env("DIRECT_URL")          // 迁移用：Neon 直连串（绕过 pgbouncer，支持 advisory lock）
 }
 
 // ============ 用户与权限 ============
