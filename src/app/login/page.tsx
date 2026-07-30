@@ -99,7 +99,7 @@ function LoginForm() {
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
-            <label className="win-label">用户名</label>
+            <label className="win-label">昵称</label>
             <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
               <span
                 className="win-input"
