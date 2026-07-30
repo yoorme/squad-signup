@@ -27,28 +27,15 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     });
     if (!announcement) return fail("公告不存在", 404);
 
-    // 自动记录已阅读
+    // 自动记录已阅读（upsert 幂等，避免重复创建；不再二次查询）
     if (announcement.reads.length === 0) {
-      await prisma.announcementRead.create({
-        data: {
-          userId: user.id,
-          announcementId: announcement.id,
+      await prisma.announcementRead.upsert({
+        where: {
+          userId_announcementId: { userId: user.id, announcementId: announcement.id },
         },
+        create: { userId: user.id, announcementId: announcement.id },
+        update: {},
       }).catch(() => {});
-      // 重新查询以包含新创建的阅读记录
-      const refetched = await prisma.announcement.findUnique({
-        where: { id },
-        include: {
-          author: { select: { username: true, nickname: true } },
-          images: { orderBy: { sortOrder: "asc" } },
-          reads: { where: { userId: user.id } },
-          comments: {
-            include: { user: { select: { username: true, nickname: true } } },
-            orderBy: { createdAt: "asc" },
-          },
-        },
-      });
-      return ok(refetched);
     }
 
     return ok(announcement);

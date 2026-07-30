@@ -1,15 +1,113 @@
 import { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser, requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
 import { calculateSquadCount, isValidSquadCount } from "@/lib/constants";
+
+// 事件详情查询的完整 payload 类型（含 squads/registrations/user 关联）
+type EventDetailPayload = Prisma.EventGetPayload<{
+  include: {
+    nature: true;
+    name: true;
+    squads: {
+      orderBy: { index: "asc" };
+      include: {
+        nature: true;
+        registrations: {
+          where: { status: "REGISTERED" };
+          include: {
+            user: {
+              select: {
+                id: true;
+                username: true;
+                nickname: true;
+                abilities: { include: { ability: true } };
+                duties: { include: { duty: true } };
+              };
+            };
+          };
+        };
+      };
+    };
+    registrations: {
+      where: { status: "REGISTERED"; squadId: null };
+      include: {
+        user: {
+          select: {
+            id: true;
+            username: true;
+            nickname: true;
+            abilities: { include: { ability: true } };
+            duties: { include: { duty: true } };
+          };
+        };
+      };
+    };
+  };
+}>;
 
 // 获取赛事列表
 export const GET = withErrorHandler(async (req: NextRequest) => {
   const user = await requireUser();
   const url = req.nextUrl;
   const status = url.searchParams.get("status") || "UPCOMING"; // UPCOMING | ARCHIVED | ALL
+  const id = url.searchParams.get("id"); // 指定赛事 ID → 单个详情
 
+  // 单个赛事详情：只查一条，避免拉全量
+  if (id) {
+    const e = await prisma.event.findUnique({
+      where: { id },
+      include: {
+        nature: true,
+        name: true,
+        squads: {
+          orderBy: { index: "asc" },
+          include: {
+            nature: true,
+            registrations: {
+              where: { status: "REGISTERED" },
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    username: true,
+                    nickname: true,
+                    abilities: { include: { ability: true } },
+                    duties: { include: { duty: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        registrations: {
+          where: { status: "REGISTERED", squadId: null },
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                nickname: true,
+                abilities: { include: { ability: true } },
+                duties: { include: { duty: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!e) return fail("赛事不存在", 404);
+
+    const myReg = await prisma.registration.findFirst({
+      where: { eventId: e.id, userId: user.id, status: "REGISTERED" },
+      select: { squadId: true, isSubstitute: true },
+    });
+
+    return ok(serializeEventDetail(e, myReg));
+  }
+
+  // 列表模式：精简字段（不拉 members 详情，仅返回计数）
   const where = status === "ALL" ? {} : { status: status as "UPCOMING" | "ARCHIVED" };
 
   const events = await prisma.event.findMany({
@@ -22,101 +120,102 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         orderBy: { index: "asc" },
         include: {
           nature: true,
-          registrations: {
-            where: { status: "REGISTERED" },
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  username: true,
-                  nickname: true,
-                  abilities: { include: { ability: true } },
-                  duties: { include: { duty: true } },
-                },
-              },
-            },
-          },
+          _count: { select: { registrations: { where: { status: "REGISTERED" } } } },
         },
       },
-      registrations: {
-        where: { status: "REGISTERED", squadId: null },
-        include: {
-          user: {
-            select: {
-              id: true,
-              username: true,
-              nickname: true,
-              abilities: { include: { ability: true } },
-              duties: { include: { duty: true } },
-            },
-          },
+      _count: {
+        select: {
+          registrations: { where: { status: "REGISTERED", squadId: null } },
         },
       },
     },
   });
 
-  // 计算我的报名状态
+  // 一次性查询我的所有报名（避免 N+1）
   const myRegistrations = await prisma.registration.findMany({
-    where: { userId: user.id, status: "REGISTERED" },
+    where: { userId: user.id, status: "REGISTERED", eventId: { in: events.map((e) => e.id) } },
     select: { eventId: true, squadId: true, isSubstitute: true },
   });
   const myRegMap = new Map(myRegistrations.map((r) => [r.eventId, r]));
 
   return ok(
-    events.map((e) => {
-      // 计算赛事报名状态版本号：基于所有报名记录的 id+squadId+createdAt 拼接的哈希
-      // 任何报名的增删、队员在分队/替补间的移动都会让版本变化
-      // 前端据此检测后台轮询拉到的数据是否有变化，决定是否提示"数据已同步"
-      const allRegs = [
-        ...e.squads.flatMap((s) => s.registrations),
-        ...e.registrations,
-      ];
-      const version = allRegs
-        .map((r) => `${r.id}:${r.squadId ?? "sub"}:${r.createdAt.getTime()}`)
-        .sort()
-        .join("|");
-
-      return {
-        id: e.id,
-        title: e.title,
-        eventTime: e.eventTime,
-        status: e.status,
-        requiredCount: e.requiredCount,
-        format: e.format,
-        nature: e.nature,
-        name: e.name,
-        createdAt: e.createdAt,
-        version,
-        squads: e.squads.map((s) => ({
-          id: s.id,
-          index: s.index,
-          capacity: s.capacity,
-          nature: s.nature,
-          registeredCount: s.registrations.length,
-          members: s.registrations.map((r) => ({
-            registrationId: r.id,
-            userId: r.user.id,
-            username: r.user.username,
-            nickname: r.user.nickname,
-            abilities: r.user.abilities.map((ua) => ua.ability),
-            duties: r.user.duties.map((ud) => ud.duty),
-          })),
-        })),
-        substitutes: e.registrations.map((r) => ({
-          registrationId: r.id,
-          userId: r.user.id,
-          username: r.user.username,
-          nickname: r.user.nickname,
-          abilities: r.user.abilities.map((ua) => ua.ability),
-          duties: r.user.duties.map((ud) => ud.duty),
-        })),
-        totalRegistered: e.squads.reduce((sum, s) => sum + s.registrations.length, 0),
-        totalSubstitutes: e.registrations.length,
-        myRegistration: myRegMap.get(e.id) || null,
-      };
-    })
+    events.map((e) => ({
+      id: e.id,
+      title: e.title,
+      eventTime: e.eventTime,
+      status: e.status,
+      requiredCount: e.requiredCount,
+      format: e.format,
+      nature: e.nature,
+      name: e.name,
+      createdAt: e.createdAt,
+      squads: e.squads.map((s) => ({
+        id: s.id,
+        index: s.index,
+        capacity: s.capacity,
+        nature: s.nature,
+        registeredCount: s._count.registrations,
+      })),
+      totalRegistered: e.squads.reduce((sum, s) => sum + s._count.registrations, 0),
+      totalSubstitutes: e._count.registrations,
+      myRegistration: myRegMap.get(e.id) || null,
+    }))
   );
 });
+
+// 序列化单个赛事详情（含 members + version）
+function serializeEventDetail(
+  e: EventDetailPayload,
+  myReg: { squadId: string | null; isSubstitute: boolean } | null
+) {
+  const allRegs = [
+    ...e.squads.flatMap((s) => s.registrations),
+    ...e.registrations,
+  ];
+  const version = allRegs
+    .map((r) => `${r.id}:${r.squadId ?? "sub"}:${r.createdAt.getTime()}`)
+    .sort()
+    .join("|");
+
+  return {
+    id: e.id,
+    title: e.title,
+    eventTime: e.eventTime,
+    status: e.status,
+    requiredCount: e.requiredCount,
+    format: e.format,
+    nature: e.nature,
+    name: e.name,
+    createdAt: e.createdAt,
+    version,
+    squads: e.squads.map((s) => ({
+      id: s.id,
+      index: s.index,
+      capacity: s.capacity,
+      nature: s.nature,
+      registeredCount: s.registrations.length,
+      members: s.registrations.map((r) => ({
+        registrationId: r.id,
+        userId: r.user.id,
+        username: r.user.username,
+        nickname: r.user.nickname,
+        abilities: r.user.abilities.map((ua) => ua.ability),
+        duties: r.user.duties.map((ud) => ud.duty),
+      })),
+    })),
+    substitutes: e.registrations.map((r) => ({
+      registrationId: r.id,
+      userId: r.user.id,
+      username: r.user.username,
+      nickname: r.user.nickname,
+      abilities: r.user.abilities.map((ua) => ua.ability),
+      duties: r.user.duties.map((ud) => ud.duty),
+    })),
+    totalRegistered: e.squads.reduce((sum, s) => sum + s.registrations.length, 0),
+    totalSubstitutes: e.registrations.length,
+    myRegistration: myReg,
+  };
+}
 
 // 创建赛事（管理员）
 export const POST = withErrorHandler(async (req: NextRequest) => {

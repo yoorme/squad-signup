@@ -70,10 +70,11 @@ export default function EventDetailPage() {
 
   const load = async (silent = false) => {
     if (!silent) setLoading(true);
-    const res = await fetch(`/api/events?status=ALL`);
+    // 仅拉取当前赛事详情，避免拉全量列表
+    const res = await fetch(`/api/events?id=${encodeURIComponent(params.id)}`);
     const data = await res.json();
     if (data.ok) {
-      const found = data.data.find((e: EventDetail) => e.id === params.id);
+      const found: EventDetail | null = data.data;
       if (found) {
         // 若静默刷新发现版本号变化，提示用户数据已更新
         // 但如果是用户自己刚操作触发的刷新，则跳过提示
@@ -92,6 +93,8 @@ export default function EventDetailPage() {
       } else {
         setEvent(null);
       }
+    } else if (res.status === 404) {
+      setEvent(null);
     }
     if (!silent) setLoading(false);
   };

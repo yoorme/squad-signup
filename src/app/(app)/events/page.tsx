@@ -16,7 +16,6 @@ interface Squad {
   capacity: number;
   nature: SquadNature;
   registeredCount: number;
-  members: { userId: string; username: string; nickname: string; }[];
 }
 interface EventListItem {
   id: string;
@@ -28,7 +27,6 @@ interface EventListItem {
   nature: Nature;
   name: Name;
   squads: Squad[];
-  substitutes: { userId: string; username: string; nickname: string; }[];
   totalRegistered: number;
   totalSubstitutes: number;
   myRegistration: { squadId: string | null; isSubstitute: boolean } | null;
