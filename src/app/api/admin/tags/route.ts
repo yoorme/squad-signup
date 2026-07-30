@@ -6,7 +6,7 @@ import { ok, fail, withErrorHandler } from "@/lib/api";
 // 标签类型
 type TagType = "ability" | "duty" | "operator" | "nature" | "name" | "squadNature";
 
-// 获取某类型标签列表（含使用情况）
+// 获取某类型标签列表（含使用情况 + disabled 状态）
 async function getTags(type: TagType) {
   switch (type) {
     case "ability": {
@@ -64,13 +64,12 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 // 增删改标签
 interface TagMutation {
   type: TagType;
-  op: "create" | "update" | "delete";
+  op: "create" | "update" | "delete" | "toggleDisable";
   id?: string;
   name?: string;
   category?: "INFANTRY" | "VEHICLE";
   faction?: string;
-  // 标签修改/删除时是否同步历史赛事
-  syncHistory?: boolean;
+  disabled?: boolean;
 }
 
 export const POST = withErrorHandler(async (req: NextRequest) => {
@@ -87,35 +86,24 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   if (op === "update") {
     if (!body.id || !body.name) return fail("缺少 id 或 name");
-    // 是否被历史赛事使用（仅赛事性质、赛事名称、分队性质需要考虑）
-    if (["nature", "name", "squadNature"].includes(type)) {
-      const usedCount = await checkTagUsed(type, body.id);
-      if (usedCount > 0 && body.syncHistory === undefined) {
-        // 询问是否同步
-        return ok({ needConfirm: true, usedCount });
-      }
-    }
+    // 直接重命名：标签 id 不变，关联赛事自动显示新名称（外键按 id 关联）
     const updated = await updateTag(type, body.id, body.name, body.category, body.faction);
     return ok(updated);
   }
 
+  if (op === "toggleDisable") {
+    if (!body.id) return fail("缺少 id");
+    const disabled = await toggleDisableTag(type, body.id, !!body.disabled);
+    return ok({ success: true, disabled });
+  }
+
   if (op === "delete") {
     if (!body.id) return fail("缺少 id");
-    if (["nature", "name", "squadNature"].includes(type)) {
-      const usedCount = await checkTagUsed(type, body.id);
-      if (usedCount > 0 && body.syncHistory === undefined) {
-        return ok({ needConfirm: true, usedCount });
-      }
-      if (usedCount > 0 && body.syncHistory === false) {
-        // 仅删标签，但有关联记录，拒绝（需要先解除关联或同步删除）
-        return fail("该标签已被使用，无法直接删除。请选择同步移除或先解除关联。");
-      }
-    } else {
-      // 用户属性标签：如果被使用，禁止删除
-      const usedCount = await checkTagUsed(type, body.id);
-      if (usedCount > 0) {
-        return fail(`该标签已被 ${usedCount} 名用户使用，无法删除`);
-      }
+    // 被使用的标签无法删除（外键约束），提示改用禁用
+    const usedCount = await checkTagUsed(type, body.id);
+    if (usedCount > 0) {
+      const who = ["nature", "name", "squadNature"].includes(type) ? "赛事" : "名用户";
+      return fail(`该标签已被 ${usedCount} 个${who}使用，无法删除。请改用「禁用」`);
     }
     await deleteTag(type, body.id);
     return ok({ success: true });
@@ -166,6 +154,18 @@ async function deleteTag(type: TagType, id: string) {
   if (type === "nature") return prisma.eventNature.delete({ where: { id } });
   if (type === "name") return prisma.eventName.delete({ where: { id } });
   if (type === "squadNature") return prisma.squadNature.delete({ where: { id } });
+  throw new Error("无效类型");
+}
+
+// 切换标签禁用状态：禁用后不可在新记录中使用，已使用的不受影响
+async function toggleDisableTag(type: TagType, id: string, disabled: boolean) {
+  const data = { disabled };
+  if (type === "ability") return (await prisma.ability.update({ where: { id }, data })).disabled;
+  if (type === "duty") return (await prisma.duty.update({ where: { id }, data })).disabled;
+  if (type === "operator") return (await prisma.operator.update({ where: { id }, data })).disabled;
+  if (type === "nature") return (await prisma.eventNature.update({ where: { id }, data })).disabled;
+  if (type === "name") return (await prisma.eventName.update({ where: { id }, data })).disabled;
+  if (type === "squadNature") return (await prisma.squadNature.update({ where: { id }, data })).disabled;
   throw new Error("无效类型");
 }
 

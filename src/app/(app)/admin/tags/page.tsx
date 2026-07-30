@@ -15,6 +15,7 @@ interface TagItem {
   faction?: string | null;
   sortOrder: number;
   usedCount: number;
+  disabled?: boolean;
 }
 
 const TAG_META: Record<TagType, { label: string; hasCategory?: boolean; hasFaction?: boolean; isEventTag?: boolean }> = {
@@ -78,27 +79,7 @@ export default function AdminTagsPage() {
     }
   };
 
-  const handleUpdate = async (item: TagItem, newName: string, newFaction?: string) => {
-    // 检查是否需要询问同步历史赛事
-    if (TAG_META[activeType].isEventTag && item.usedCount > 0) {
-      const yes = await confirm({
-        title: "同步修改历史赛事？",
-        message: (
-          <div>
-            <div style={{ marginBottom: 8 }}>该标签已被 <b>{item.usedCount}</b> 个赛事使用。</div>
-            <div>是否同步修改历史赛事中的此标签？</div>
-            <div style={{ marginTop: 8, fontSize: 12, color: "var(--win-text-tertiary)" }}>
-              · 选择「同步」：历史赛事中的标签也会重命名<br/>
-              · 选择「取消」：放弃本次修改
-            </div>
-          </div>
-        ),
-        confirmText: "同步修改",
-        cancelText: "取消",
-      });
-      if (!yes) return;
-    }
-
+  const handleUpdate = async (item: TagItem, newName: string, newCategory?: string, newFaction?: string) => {
     const res = await fetch("/api/admin/tags", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -107,8 +88,8 @@ export default function AdminTagsPage() {
         op: "update",
         id: item.id,
         name: newName.trim(),
-        faction: newFaction,
-        syncHistory: true,
+        category: TAG_META[activeType].hasCategory ? newCategory : undefined,
+        faction: TAG_META[activeType].hasFaction ? newFaction : undefined,
       }),
     });
     const data = await res.json();
@@ -121,49 +102,30 @@ export default function AdminTagsPage() {
     }
   };
 
-  const handleDelete = async (item: TagItem) => {
-    if (TAG_META[activeType].isEventTag && item.usedCount > 0) {
-      // 询问是否同步从历史赛事移除
-      const sync = await confirm({
-        title: "删除标签",
-        message: (
-          <div>
-            <div style={{ marginBottom: 8 }}>该标签已被 <b>{item.usedCount}</b> 个赛事使用。</div>
-            <div>是否同时从历史赛事中移除此标签？</div>
-            <div style={{ marginTop: 8, fontSize: 12, color: "var(--win-text-tertiary)" }}>
-              · 选择「同步移除」：历史赛事中的标签会被移除<br/>
-              · 选择「取消」：放弃删除
-            </div>
-          </div>
-        ),
-        confirmText: "同步移除",
-        cancelText: "取消",
-        danger: true,
-      });
-      if (!sync) return;
-
-      // 注意：当前实现下，删除标签会导致关联赛事的引用变无效。
-      // 这里简化处理：直接调用删除，由前端逻辑保证（生产环境应进一步处理）
-      const res = await fetch("/api/admin/tags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: activeType, op: "delete", id: item.id, syncHistory: true }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        toast("已删除", "success");
-        load();
-      } else {
-        toast(data.error || "删除失败", "error");
-      }
-      return;
+  // 禁用/启用：禁用后所有人不可在新记录中使用此标签，已使用的不受影响
+  const handleToggleDisable = async (item: TagItem) => {
+    const next = !item.disabled;
+    const res = await fetch("/api/admin/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: activeType, op: "toggleDisable", id: item.id, disabled: next }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      toast(next ? "已禁用" : "已启用", "success");
+      load();
+    } else {
+      toast(data.error || "操作失败", "error");
     }
+  };
 
-    // 普通删除
+  // 删除：同步删除，仅确认/取消。被使用的标签无法删除，提示改用禁用。
+  const handleDelete = async (item: TagItem) => {
     const yes = await confirm({
       title: "删除标签",
-      message: `确定要删除「${item.name}」吗？`,
-      confirmText: "删除",
+      message: `确定要删除「${item.name}」吗？被使用的标签无法删除，请改用「禁用」。`,
+      confirmText: "确认",
+      cancelText: "取消",
       danger: true,
     });
     if (!yes) return;
@@ -190,7 +152,7 @@ export default function AdminTagsPage() {
 
       <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 4 }}>标签维护</h1>
       <p style={{ fontSize: 13, color: "var(--win-text-secondary)", marginBottom: 24 }}>
-        管理各类标签，支持增加、修改、删除
+        管理能力、职责、干员、赛事性质、赛事名称、分队性质等标签 · 禁用后不可新用，已使用的不受影响
       </p>
 
       {/* 类型切换 */}
@@ -218,7 +180,7 @@ export default function AdminTagsPage() {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600 }}>{TAG_META[activeType].label}列表（{items.length}）</h2>
-        <button className="win-btn win-btn-primary" onClick={() => { setName(""); setFaction(""); setCreateOpen(true); }}>
+        <button className="win-btn win-btn-primary" onClick={() => { setName(""); setFaction(""); setCategory("INFANTRY"); setCreateOpen(true); }}>
           + 新增
         </button>
       </div>
@@ -239,10 +201,13 @@ export default function AdminTagsPage() {
                 alignItems: "center",
                 padding: "12px 16px",
                 borderBottom: idx === items.length - 1 ? "none" : "1px solid var(--win-border)",
+                opacity: item.disabled ? 0.6 : 1,
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 500 }}>{item.name}</span>
+                <span style={{ fontSize: 14, fontWeight: 500, textDecoration: item.disabled ? "line-through" : "none" }}>
+                  {item.name}
+                </span>
                 {item.category && (
                   <span className="win-chip" style={{ fontSize: 11 }}>
                     {item.category === "INFANTRY" ? "步兵" : "载具"}
@@ -250,6 +215,11 @@ export default function AdminTagsPage() {
                 )}
                 {item.faction && (
                   <span className="win-chip" style={{ fontSize: 11 }}>{item.faction}</span>
+                )}
+                {item.disabled && (
+                  <span className="win-chip" style={{ fontSize: 11, background: "rgba(209,52,56,0.1)", color: "var(--win-danger)", borderColor: "var(--win-danger)" }}>
+                    已禁用
+                  </span>
                 )}
                 <span style={{ fontSize: 11, color: "var(--win-text-tertiary)" }}>
                   已使用 {item.usedCount}
@@ -259,9 +229,21 @@ export default function AdminTagsPage() {
                 <button
                   className="win-btn"
                   style={{ fontSize: 12, padding: "4px 10px", minHeight: 26 }}
-                  onClick={() => { setEditTarget(item); setName(item.name); setFaction(item.faction || ""); setCategory(item.category || "INFANTRY"); }}
+                  onClick={() => {
+                    setEditTarget(item);
+                    setName(item.name);
+                    setFaction(item.faction || "");
+                    setCategory(item.category || "INFANTRY");
+                  }}
                 >
                   编辑
+                </button>
+                <button
+                  className="win-btn"
+                  style={{ fontSize: 12, padding: "4px 10px", minHeight: 26, color: item.disabled ? "var(--win-success)" : "var(--win-warning)" }}
+                  onClick={() => handleToggleDisable(item)}
+                >
+                  {item.disabled ? "启用" : "禁用"}
                 </button>
                 <button
                   className="win-btn"
@@ -321,7 +303,7 @@ export default function AdminTagsPage() {
             <button className="win-btn" onClick={() => setEditTarget(null)}>取消</button>
             <button
               className="win-btn win-btn-primary"
-              onClick={() => editTarget && handleUpdate(editTarget, name, faction)}
+              onClick={() => editTarget && handleUpdate(editTarget, name, category, faction)}
             >
               保存
             </button>
@@ -333,15 +315,24 @@ export default function AdminTagsPage() {
             <label className="win-label">名称</label>
             <input className="win-input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           </div>
+          {TAG_META[activeType].hasCategory && (
+            <div>
+              <label className="win-label">方向</label>
+              <select className="win-input" value={category} onChange={(e) => setCategory(e.target.value as any)}>
+                <option value="INFANTRY">步兵方向</option>
+                <option value="VEHICLE">载具方向</option>
+              </select>
+            </div>
+          )}
           {TAG_META[activeType].hasFaction && (
             <div>
               <label className="win-label">阵营（可选）</label>
               <input className="win-input" value={faction} onChange={(e) => setFaction(e.target.value)} />
             </div>
           )}
-          {editTarget && TAG_META[activeType].isEventTag && editTarget.usedCount > 0 && (
-            <div style={{ padding: 12, background: "var(--win-bg-hover)", borderRadius: 8, fontSize: 13, color: "var(--win-warning)" }}>
-              该标签已被 {editTarget.usedCount} 个赛事使用，保存时会询问是否同步修改历史赛事。
+          {editTarget && editTarget.usedCount > 0 && (
+            <div style={{ padding: 12, background: "var(--win-bg-hover)", borderRadius: 8, fontSize: 13, color: "var(--win-text-secondary)" }}>
+              该标签已被使用 {editTarget.usedCount} 次。修改名称后，所有引用处将自动同步显示新名称（按 ID 关联）。
             </div>
           )}
         </div>

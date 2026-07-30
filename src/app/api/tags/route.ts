@@ -7,9 +7,9 @@ import { ok, withErrorHandler } from "@/lib/api";
 export const GET = withErrorHandler(async (req: NextRequest) => {
   await requireUser();
   const [natures, names, squadNatures] = await Promise.all([
-    prisma.eventNature.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
-    prisma.eventName.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
-    prisma.squadNature.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+    prisma.eventNature.findMany({ where: { disabled: false }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+    prisma.eventName.findMany({ where: { disabled: false }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+    prisma.squadNature.findMany({ where: { disabled: false }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
   ]);
 
   // 标记每个标签是否被使用过

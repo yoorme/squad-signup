@@ -19,20 +19,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   });
   const unreadAnnouncements = Math.max(0, totalAnnouncements - readAnnouncements);
 
-  // 计算未报名的进行中赛事数
+  // 计算未读的进行中赛事数（已归档/已过期赛事不计入红点）
+  const now = new Date();
   const upcomingEvents = await prisma.event.findMany({
-    where: { status: "UPCOMING" },
+    where: { status: "UPCOMING", eventTime: { gte: now } },
     select: { id: true },
   });
   const upcomingEventIds = upcomingEvents.map((e) => e.id);
-  const myRegistrations = await prisma.registration.count({
-    where: {
-      userId: user.id,
-      status: "REGISTERED",
-      eventId: { in: upcomingEventIds },
-    },
+  const readEventIds = await prisma.eventRead.findMany({
+    where: { userId: user.id, eventId: { in: upcomingEventIds } },
+    select: { eventId: true },
   });
-  const unregisteredEvents = Math.max(0, upcomingEvents.length - myRegistrations);
+  const readEventSet = new Set(readEventIds.map((r) => r.eventId));
+  const unreadEvents = upcomingEventIds.filter((id) => !readEventSet.has(id)).length;
 
   const navItems = [
     {
@@ -49,7 +48,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     {
       href: "/events",
       label: "赛事",
-      badge: unregisteredEvents,
+      badge: unreadEvents,
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
           <rect x="3" y="5" width="18" height="14" rx="2" />

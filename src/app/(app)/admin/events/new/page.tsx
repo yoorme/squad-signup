@@ -45,13 +45,15 @@ export default function NewEventPage() {
   // 自动计算分队数量
   const teamCount = calculateSquadCount(Number(requiredCount) || 1);
 
-  // 当分队数量变化时，自动调整 squadNatures 数组
+  // 当分队数量变化或可选标签加载完成时，自动调整 squadNatures 数组
   useEffect(() => {
+    const defaultId = tags.squadNatures[0]?.id || "";
     setSquadNatures((prev) => {
       const next = [...prev];
-      while (next.length < teamCount) next.push(tags.squadNatures[0]?.id || "");
+      while (next.length < teamCount) next.push(defaultId);
       while (next.length > teamCount) next.pop();
-      return next;
+      // 回填因 tags 未加载而残留的空值
+      return next.map((id) => (id || defaultId));
     });
   }, [teamCount, tags.squadNatures]);
 
@@ -90,7 +92,7 @@ export default function NewEventPage() {
     setSaving(false);
     if (data.ok) {
       toast("赛事已创建", "success");
-      router.push("/events");
+      router.push("/admin/events");
       router.refresh();
     } else {
       toast(data.error || "创建失败", "error");
@@ -103,9 +105,9 @@ export default function NewEventPage() {
 
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
-      <Link href="/admin" style={{ fontSize: 13, color: "var(--win-text-secondary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 12 }}>
+      <Link href="/admin/events" style={{ fontSize: 13, color: "var(--win-text-secondary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 12 }}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 6l-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        返回管理首页
+        返回赛事管理
       </Link>
 
       <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 24 }}>创建赛事</h1>
@@ -240,7 +242,7 @@ export default function NewEventPage() {
 
         {/* 操作 */}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
-          <Link href="/admin" className="win-btn">取消</Link>
+          <Link href="/admin/events" className="win-btn">取消</Link>
           <button className="win-btn win-btn-primary" onClick={handleSave} disabled={saving}>
             {saving ? "创建中..." : "创建赛事"}
           </button>

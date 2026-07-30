@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
-import { useToast } from "@/components/ui/Toast";
 import { formatDateTime } from "@/lib/constants";
 
 interface Nature { id: string; name: string; }
@@ -33,10 +31,6 @@ interface EventListItem {
 }
 
 export default function EventsPage() {
-  const { data: session } = useSession();
-  const toast = useToast();
-  const isAdmin = (session?.user as any)?.role === "ADMIN";
-
   const [events, setEvents] = useState<EventListItem[]>([]);
   const [filter, setFilter] = useState<"UPCOMING" | "ARCHIVED" | "ALL">("UPCOMING");
   const [loading, setLoading] = useState(true);
@@ -60,33 +54,26 @@ export default function EventsPage() {
             查看即将进行的赛事并报名
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--win-bg-hover)", borderRadius: 6 }}>
-            {(["UPCOMING", "ARCHIVED", "ALL"] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: 4,
-                  border: "none",
-                  background: filter === f ? "var(--win-bg-card-solid)" : "transparent",
-                  color: filter === f ? "var(--win-accent)" : "var(--win-text-secondary)",
-                  fontSize: 13,
-                  cursor: "pointer",
-                  fontWeight: filter === f ? 600 : 400,
-                  boxShadow: filter === f ? "var(--win-shadow-card)" : "none",
-                }}
-              >
-                {f === "UPCOMING" ? "即将进行" : f === "ARCHIVED" ? "已结束" : "全部"}
-              </button>
-            ))}
-          </div>
-          {isAdmin && (
-            <Link href="/admin/events/new" className="win-btn win-btn-primary" style={{ fontSize: 13 }}>
-              + 创建赛事
-            </Link>
-          )}
+        <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--win-bg-hover)", borderRadius: 6 }}>
+          {(["UPCOMING", "ARCHIVED", "ALL"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 4,
+                border: "none",
+                background: filter === f ? "var(--win-bg-card-solid)" : "transparent",
+                color: filter === f ? "var(--win-accent)" : "var(--win-text-secondary)",
+                fontSize: 13,
+                cursor: "pointer",
+                fontWeight: filter === f ? 600 : 400,
+                boxShadow: filter === f ? "var(--win-shadow-card)" : "none",
+              }}
+            >
+              {f === "UPCOMING" ? "即将进行" : f === "ARCHIVED" ? "已结束" : "全部"}
+            </button>
+          ))}
         </div>
       </div>
 

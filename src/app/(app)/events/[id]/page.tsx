@@ -1,21 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { formatDateTime } from "@/lib/constants";
-import {
-  DndContext,
-  PointerSensor,
-  TouchSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import { SquadManageView } from "@/components/events/SquadManageView";
 
 interface Ability { id: string; name: string; category: string; }
 interface Duty { id: string; name: string; }
@@ -54,11 +45,9 @@ interface EventDetail {
 
 export default function EventDetailPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const { data: session } = useSession();
   const toast = useToast();
   const confirm = useConfirm();
-  const isAdmin = (session?.user as any)?.role === "ADMIN";
   const myUserId = (session?.user as any)?.id;
 
   const [event, setEvent] = useState<EventDetail | null>(null);
@@ -182,41 +171,6 @@ export default function EventDetailPage() {
     }
   };
 
-  const handleDelete = async () => {
-    const yes = await confirm({
-      title: "删除赛事",
-      message: "确定要删除此赛事吗？所有报名记录将一并删除，无法恢复。",
-      confirmText: "删除",
-      danger: true,
-    });
-    if (!yes) return;
-    const res = await fetch(`/api/events/manage?id=${event.id}`, { method: "DELETE" });
-    const data = await res.json();
-    if (data.ok) {
-      toast("已删除", "success");
-      router.push("/events");
-      router.refresh();
-    } else {
-      toast(data.error || "删除失败", "error");
-    }
-  };
-
-  const handleArchiveToggle = async () => {
-    const next = isArchived ? "UPCOMING" : "ARCHIVED";
-    const res = await fetch("/api/events/manage", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: event.id, status: next }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      toast(isArchived ? "已恢复" : "已归档", "success");
-      reloadAfterMutation();
-    } else {
-      toast(data.error || "操作失败", "error");
-    }
-  };
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 1080, margin: "0 auto" }}>
       <Link
@@ -261,16 +215,6 @@ export default function EventDetailPage() {
             <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>{event.title}</h1>
             <div style={{ fontSize: 13, color: "var(--win-text-secondary)" }}>{formatDateTime(event.eventTime)}</div>
           </div>
-          {isAdmin && (
-            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-              <button onClick={handleArchiveToggle} className="win-btn win-btn-secondary" style={{ fontSize: 12, padding: "4px 10px", minHeight: 28 }}>
-                {isArchived ? "恢复" : "归档"}
-              </button>
-              <button onClick={handleDelete} className="win-btn win-btn-danger" style={{ fontSize: 12, padding: "4px 10px", minHeight: 28 }}>
-                删除
-              </button>
-            </div>
-          )}
         </div>
 
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--win-border)", display: "flex", gap: 24, flexWrap: "wrap", fontSize: 13 }}>
@@ -289,18 +233,14 @@ export default function EventDetailPage() {
         </div>
       </div>
 
-      {/* 分队与替补展示/管理 */}
-      {isAdmin ? (
-        <SquadManageView event={event} onChanged={reloadAfterMutation} disabled={isArchived} />
-      ) : (
-        <SquadDisplayView
-          event={event}
-          myReg={myReg}
-          myUserId={myUserId}
-          onRegister={handleRegister}
-          onCancel={handleCancel}
-        />
-      )}
+      {/* 分队与替补展示（管理员与普通队员一致；赛事标签/分队性质编辑请在「赛事管理」中操作）*/}
+      <SquadDisplayView
+        event={event}
+        myReg={myReg}
+        myUserId={myUserId}
+        onRegister={handleRegister}
+        onCancel={handleCancel}
+      />
     </div>
   );
 }

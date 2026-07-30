@@ -104,6 +104,15 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       select: { squadId: true, isSubstitute: true },
     });
 
+    // 标记已读（幂等），用于导航红点消除
+    await prisma.eventRead
+      .upsert({
+        where: { userId_eventId: { userId: user.id, eventId: e.id } },
+        create: { userId: user.id, eventId: e.id },
+        update: {},
+      })
+      .catch(() => {});
+
     return ok(serializeEventDetail(e, myReg));
   }
 
@@ -132,11 +141,19 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   });
 
   // 一次性查询我的所有报名（避免 N+1）
+  const eventIds = events.map((e) => e.id);
   const myRegistrations = await prisma.registration.findMany({
-    where: { userId: user.id, status: "REGISTERED", eventId: { in: events.map((e) => e.id) } },
+    where: { userId: user.id, status: "REGISTERED", eventId: { in: eventIds } },
     select: { eventId: true, squadId: true, isSubstitute: true },
   });
   const myRegMap = new Map(myRegistrations.map((r) => [r.eventId, r]));
+
+  // 一次性查询我的已读赛事（避免 N+1）
+  const myReads = await prisma.eventRead.findMany({
+    where: { userId: user.id, eventId: { in: eventIds } },
+    select: { eventId: true },
+  });
+  const myReadSet = new Set(myReads.map((r) => r.eventId));
 
   return ok(
     events.map((e) => ({
@@ -149,6 +166,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       nature: e.nature,
       name: e.name,
       createdAt: e.createdAt,
+      isRead: myReadSet.has(e.id),
       squads: e.squads.map((s) => ({
         id: s.id,
         index: s.index,
@@ -248,13 +266,27 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     return fail("分队数量不满足规则");
   }
 
-  // 校验标签存在
+  // 校验标签存在且未被禁用
   const [nature, name] = await Promise.all([
     prisma.eventNature.findUnique({ where: { id: natureId } }),
     prisma.eventName.findUnique({ where: { id: nameId } }),
   ]);
   if (!nature) return fail("赛事性质不存在");
+  if (nature.disabled) return fail("赛事性质已被禁用，请选择其他标签");
   if (!name) return fail("赛事名称不存在");
+  if (name.disabled) return fail("赛事名称已被禁用，请选择其他标签");
+
+  // 校验分队性质存在且未被禁用
+  const squadNatureIds = [...new Set(squadNatures)];
+  const squadNatures_db = await prisma.squadNature.findMany({
+    where: { id: { in: squadNatureIds } },
+  });
+  const squadNatureMap = new Map(squadNatures_db.map((s) => [s.id, s]));
+  for (const snId of squadNatureIds) {
+    const sn = squadNatureMap.get(snId);
+    if (!sn) return fail("分队性质不存在");
+    if (sn.disabled) return fail(`分队性质「${sn.name}」已被禁用，请选择其他标签`);
+  }
 
   const eventDate = new Date(eventTime);
   if (isNaN(eventDate.getTime())) return fail("时间格式错误");

@@ -167,7 +167,7 @@ export default function AdminUsersPage() {
                         <button
                           className="win-btn"
                           style={{ fontSize: 11, padding: "3px 8px", minHeight: 24 }}
-                          onClick={() => { setResetTarget(u); setNewPassword(""); }}
+                          onClick={() => { setResetTarget(u); setNewPassword("123456"); }}
                         >
                           重置密码
                         </button>

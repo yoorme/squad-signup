@@ -10,13 +10,13 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const [abilities, duties, operators] = await Promise.all([
     only && only !== "ability" && only !== "all"
       ? []
-      : prisma.ability.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+      : prisma.ability.findMany({ where: { disabled: false }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     only && only !== "duty" && only !== "all"
       ? []
-      : prisma.duty.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+      : prisma.duty.findMany({ where: { disabled: false }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     only && only !== "operator" && only !== "all"
       ? []
-      : prisma.operator.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+      : prisma.operator.findMany({ where: { disabled: false }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
   ]);
 
   return ok({ abilities, duties, operators });

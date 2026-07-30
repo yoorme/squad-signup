@@ -25,6 +25,7 @@ model User {
 
   registrations      Registration[]
   announcementReads  AnnouncementRead[]
+  eventReads         EventRead[]
   comments           AnnouncementComment[]
   announcements      Announcement[]
   events             Event[]
@@ -47,6 +48,7 @@ model Ability {
   name      String
   category  AbilityCategory
   sortOrder Int            @default(0)
+  disabled  Boolean        @default(false)
   users     UserAbility[]
   @@unique([name, category])
 }
@@ -68,6 +70,7 @@ model Duty {
   id        String     @id @default(cuid())
   name      String     @unique // 队长 / 指挥 / 无
   sortOrder Int        @default(0)
+  disabled  Boolean    @default(false)
   users     UserDuty[]
 }
 
@@ -84,6 +87,7 @@ model Operator {
   name      String         @unique
   faction   String? // 阵营（可选，用于分组展示）
   sortOrder Int            @default(0)
+  disabled  Boolean        @default(false)
   users     UserOperator[]
 }
 
@@ -101,6 +105,7 @@ model EventNature {
   id        String   @id @default(cuid())
   name      String   @unique // 正赛 / 训练赛 / 娱乐赛 / 其他
   sortOrder Int      @default(0)
+  disabled  Boolean  @default(false)
   events    Event[]
 }
 
@@ -108,6 +113,7 @@ model EventName {
   id        String   @id @default(cuid())
   name      String   @unique // 百姓杯等
   sortOrder Int      @default(0)
+  disabled  Boolean  @default(false)
   events    Event[]
 }
 
@@ -115,6 +121,7 @@ model SquadNature {
   id        String   @id @default(cuid())
   name      String   @unique // 步兵 / 载具 / 机动 / 指挥
   sortOrder Int      @default(0)
+  disabled  Boolean  @default(false)
   squads    Squad[]
 }
 
@@ -191,6 +198,17 @@ model Event {
   name          EventName   @relation(fields: [nameId], references: [id])
   squads        Squad[]
   registrations Registration[]
+  reads         EventRead[]
+}
+
+// 赛事已读记录（用户查看过赛事详情后标记，用于导航红点）
+model EventRead {
+  userId    String
+  eventId   String
+  readAt    DateTime @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event     Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  @@id([userId, eventId])
 }
 
 enum EventFormat {

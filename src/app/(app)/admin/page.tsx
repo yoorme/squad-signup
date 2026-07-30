@@ -27,9 +27,9 @@ export default function AdminHome() {
       icon: "📢",
     },
     {
-      href: "/admin/events/new",
-      title: "创建赛事",
-      desc: "创建新赛事并设置分队数量与性质",
+      href: "/admin/events",
+      title: "赛事管理",
+      desc: "创建赛事、修改赛事标签与分队性质",
       icon: "🏆",
     },
   ];
