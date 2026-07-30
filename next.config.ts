@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Docker 部署：输出 standalone 产物，镜像体积更小
+  output: "standalone",
   allowedDevOrigins: ["remote-agent.svc.cluster.local", "*.remote-agent.svc.cluster.local"],
   // 生产构建优化
   poweredByHeader: false,

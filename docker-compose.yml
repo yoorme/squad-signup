@@ -1,0 +1,49 @@
+services:
+  # PostgreSQL 数据库
+  db:
+    image: postgres:16-alpine
+    container_name: squad-signup-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-squad}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-squad_password}
+      POSTGRES_DB: ${POSTGRES_DB:-squad_signup}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # 仅 expose 给内部网络，不对外暴露端口（更安全）
+    # 如需用 1Panel 自带的 PostgreSQL，注释掉整个 db 服务即可
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-squad}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Next.js 应用
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: squad-signup-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # 数据库连接（指向同网络的 db 服务）
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-squad}:${POSTGRES_PASSWORD:-squad_password}@db:5432/${POSTGRES_DB:-squad_signup}?schema=public"
+      DIRECT_URL: "postgresql://${POSTGRES_USER:-squad}:${POSTGRES_PASSWORD:-squad_password}@db:5432/${POSTGRES_DB:-squad_signup}?schema=public"
+      # NextAuth 密钥（必须修改）
+      AUTH_SECRET: "${AUTH_SECRET}"
+      # 初始管理员
+      INITIAL_ADMIN_USERNAME: "${INITIAL_ADMIN_USERNAME:-MMR丨Admin}"
+      INITIAL_ADMIN_PASSWORD: "${INITIAL_ADMIN_PASSWORD:-admin123456}"
+      # 站点 URL（部署后改成实际域名，如 https://signup.example.com）
+      NEXTAUTH_URL: "${NEXTAUTH_URL:-http://localhost:3000}"
+    ports:
+      # 对外暴露 3000 端口；1Panel 反向代理指向此端口
+      - "3000:3000"
+
+volumes:
+  pgdata:
