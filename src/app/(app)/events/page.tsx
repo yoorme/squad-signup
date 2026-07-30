@@ -24,6 +24,7 @@ interface EventListItem {
   eventTime: string;
   status: "UPCOMING" | "ARCHIVED";
   requiredCount: number;
+  format: "BO3" | "BO5" | "R2" | null;
   nature: Nature;
   name: Name;
   squads: Squad[];
@@ -144,6 +145,11 @@ function EventCard({ event }: { event: EventListItem }) {
               {event.nature.name}
             </span>
             <span className="win-chip" style={{ fontSize: 11 }}>{event.name.name}</span>
+            {event.format && (
+              <span className="win-chip" style={{ fontSize: 11, background: "var(--win-bg-selected)", color: "var(--win-accent)", borderColor: "var(--win-accent)" }}>
+                {event.format}
+              </span>
+            )}
             {event.status === "ARCHIVED" && (
               <span className="win-chip" style={{ fontSize: 11, background: "var(--win-bg-pressed)", color: "var(--win-text-tertiary)" }}>
                 已结束

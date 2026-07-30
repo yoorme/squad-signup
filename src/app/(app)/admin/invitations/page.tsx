@@ -24,7 +24,7 @@ export default function AdminInvitationsPage() {
   const [items, setItems] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
-  const [maxUses, setMaxUses] = useState(10);
+  const [maxUses, setMaxUses] = useState("10");
   const [creating, setCreating] = useState(false);
 
   const load = async () => {
@@ -38,15 +38,16 @@ export default function AdminInvitationsPage() {
   useEffect(() => { load(); }, []);
 
   const handleCreate = async () => {
-    if (!Number.isInteger(maxUses) || maxUses <= 0) {
-      toast("次数必须是正整数", "warning");
+    const num = Number(maxUses);
+    if (maxUses === "" || !Number.isInteger(num) || num <= 0) {
+      toast("次数必须是非空正整数", "warning");
       return;
     }
     setCreating(true);
     const res = await fetch("/api/admin/invitations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ maxUses }),
+      body: JSON.stringify({ maxUses: num }),
     });
     const data = await res.json();
     setCreating(false);
@@ -183,7 +184,7 @@ export default function AdminInvitationsPage() {
             type="number"
             min={1}
             value={maxUses}
-            onChange={(e) => setMaxUses(Number(e.target.value))}
+            onChange={(e) => setMaxUses(e.target.value)}
             autoFocus
           />
           <p style={{ fontSize: 12, color: "var(--win-text-tertiary)", marginTop: 8 }}>

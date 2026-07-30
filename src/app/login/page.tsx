@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { useToast } from "@/components/ui/Toast";
+import { NAME_PREFIX } from "@/lib/constants";
 
 // useSearchParams 在静态预渲染时需要 Suspense 边界包裹，否则触发 CSR bailout
 export default function LoginPage() {
@@ -32,8 +33,9 @@ function LoginForm() {
       return;
     }
     setLoading(true);
+    // 前端已分离 MMR丨前缀，提交时拼成完整用户名（auth 兼容无前缀输入，此处拼接保证一致）
     const res = await signIn("credentials", {
-      username: username.trim(),
+      username: NAME_PREFIX + username.trim(),
       password,
       redirect: false,
     });
@@ -97,15 +99,35 @@ function LoginForm() {
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
-            <label className="win-label">用户名 / 昵称</label>
-            <input
-              className="win-input"
-              type="text"
-              placeholder="MMR丨昵称 或 昵称"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoFocus
-            />
+            <label className="win-label">用户名</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
+              <span
+                className="win-input"
+                style={{
+                  flexShrink: 0,
+                  width: "auto",
+                  borderRight: "none",
+                  borderTopRightRadius: 0,
+                  borderBottomRightRadius: 0,
+                  color: "var(--win-text-tertiary)",
+                  background: "var(--win-bg-hover)",
+                }}
+              >
+                {NAME_PREFIX}
+              </span>
+              <input
+                className="win-input"
+                type="text"
+                placeholder="请输入昵称"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoFocus
+                style={{
+                  borderTopLeftRadius: 0,
+                  borderBottomLeftRadius: 0,
+                }}
+              />
+            </div>
           </div>
           <div>
             <label className="win-label">密码</label>

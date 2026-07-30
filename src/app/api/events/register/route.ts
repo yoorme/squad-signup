@@ -7,8 +7,8 @@ import { ok, fail, withErrorHandler } from "@/lib/api";
 // 报名接口
 // body: { eventId, squadId?, asSubstitute? }
 //
-// 并发策略（针对 SQLite 优化）：
-// - 不使用长事务（SQLite 写入串行化，长事务会导致排队超时）
+// 并发策略：
+// - 不使用长事务
 // - 依赖复合唯一约束 [eventId, userId, status] 防止重复报名
 // - 容量校验使用原子 count，最后由业务层 + 约束兜底
 // - 满员时自动回退为替补

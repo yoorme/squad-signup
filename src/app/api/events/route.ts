@@ -82,6 +82,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
         eventTime: e.eventTime,
         status: e.status,
         requiredCount: e.requiredCount,
+        format: e.format,
         nature: e.nature,
         name: e.name,
         createdAt: e.createdAt,
@@ -121,12 +122,13 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 export const POST = withErrorHandler(async (req: NextRequest) => {
   const user = await requireAdmin();
   const body = await req.json();
-  const { eventTime, natureId, nameId, requiredCount, squadNatures } = body as {
+  const { eventTime, natureId, nameId, requiredCount, squadNatures, format } = body as {
     eventTime: string;
     natureId: string;
     nameId: string;
     requiredCount: number;
     squadNatures: string[]; // 每支队伍的性质 ID 列表
+    format?: "BO3" | "BO5" | "R2" | null; // 赛制，null/undefined 表示未知
   };
 
   if (!eventTime || !natureId || !nameId || !requiredCount) {
@@ -136,6 +138,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   if (!Number.isInteger(required) || required <= 0) {
     return fail("要求人数必须是正整数");
   }
+  // 校验赛制取值
+  const validFormats = ["BO3", "BO5", "R2"];
+  const formatValue = format && validFormats.includes(format) ? format : null;
   const teamCount = calculateSquadCount(required);
   if (!squadNatures || squadNatures.length !== teamCount) {
     return fail(`分队数量必须为 ${teamCount}（满足 ${teamCount}*4 >= ${required} 且差值 < 4）`);
@@ -165,6 +170,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         natureId,
         nameId,
         requiredCount: required,
+        format: formatValue,
         createdById: user.id,
       },
     });

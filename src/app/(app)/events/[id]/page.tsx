@@ -41,6 +41,7 @@ interface EventDetail {
   eventTime: string;
   status: "UPCOMING" | "ARCHIVED";
   requiredCount: number;
+  format: "BO3" | "BO5" | "R2" | null;
   nature: { id: string; name: string };
   name: { id: string; name: string };
   squads: Squad[];
@@ -240,6 +241,11 @@ export default function EventDetailPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
               <span className="win-chip" style={{ fontSize: 11, borderColor: "var(--win-border-strong)" }}>{event.nature.name}</span>
               <span className="win-chip" style={{ fontSize: 11 }}>{event.name.name}</span>
+              {event.format && (
+                <span className="win-chip" style={{ fontSize: 11, background: "var(--win-bg-selected)", color: "var(--win-accent)", borderColor: "var(--win-accent)" }}>
+                  {event.format}
+                </span>
+              )}
               {isArchived && (
                 <span className="win-chip" style={{ fontSize: 11, background: "var(--win-bg-pressed)", color: "var(--win-text-tertiary)" }}>已结束</span>
               )}

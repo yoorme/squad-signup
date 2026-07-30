@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useToast } from "@/components/ui/Toast";
-import { calculateSquadCount, toLocalDateTimeInput } from "@/lib/constants";
+import { calculateSquadCount } from "@/lib/constants";
 
 interface TagItem { id: string; name: string; }
 interface Tags {
@@ -24,7 +24,8 @@ export default function NewEventPage() {
   const [eventTime, setEventTime] = useState("");
   const [natureId, setNatureId] = useState("");
   const [nameId, setNameId] = useState("");
-  const [requiredCount, setRequiredCount] = useState(16);
+  const [requiredCount, setRequiredCount] = useState("16");
+  const [format, setFormat] = useState<"BO3" | "BO5" | "R2" | null>(null);
   const [squadNatures, setSquadNatures] = useState<string[]>([]);
 
   const load = async () => {
@@ -63,8 +64,9 @@ export default function NewEventPage() {
       toast("请选择赛事性质和名称", "warning");
       return;
     }
-    if (!Number.isInteger(Number(requiredCount)) || Number(requiredCount) <= 0) {
-      toast("要求人数必须是正整数", "warning");
+    const requiredNum = Number(requiredCount);
+    if (requiredCount.trim() === "" || !Number.isInteger(requiredNum) || requiredNum <= 0) {
+      toast("要求人数必须是非空正整数", "warning");
       return;
     }
     if (squadNatures.some((id) => !id)) {
@@ -79,7 +81,8 @@ export default function NewEventPage() {
         eventTime,
         natureId,
         nameId,
-        requiredCount: Number(requiredCount),
+        requiredCount: requiredNum,
+        format,
         squadNatures,
       }),
     });
@@ -167,11 +170,40 @@ export default function NewEventPage() {
             min={1}
             className="win-input"
             value={requiredCount}
-            onChange={(e) => setRequiredCount(Number(e.target.value))}
+            onChange={(e) => setRequiredCount(e.target.value)}
             style={{ maxWidth: 200 }}
           />
           <p style={{ fontSize: 12, color: "var(--win-text-tertiary)", marginTop: 6 }}>
-            系统自动计算分队数量：{teamCount} 队 × 4 人 = {teamCount * 4} 空位（差值 {teamCount * 4 - Number(requiredCount || 0)} &lt; 4）
+            系统自动计算分队数量：{teamCount} 队 × 4 人 = {teamCount * 4} 空位（差值 {teamCount * 4 - (Number(requiredCount) || 0)} &lt; 4）
+          </p>
+        </div>
+
+        {/* 赛制 */}
+        <div>
+          <label className="win-label">赛制（可选）</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {(["BO3", "BO5", "R2"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFormat(format === f ? null : f)}
+                className={`win-chip ${format === f ? "win-chip-accent" : ""}`}
+                style={{ cursor: "pointer" }}
+              >
+                {f}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setFormat(null)}
+              className={`win-chip ${format === null ? "win-chip-accent" : ""}`}
+              style={{ cursor: "pointer", color: format === null ? "var(--win-accent)" : "var(--win-text-tertiary)" }}
+            >
+              未知
+            </button>
+          </div>
+          <p style={{ fontSize: 12, color: "var(--win-text-tertiary)", marginTop: 6 }}>
+            选择「未知」则不展示赛制标签
           </p>
         </div>
 

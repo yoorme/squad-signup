@@ -47,66 +47,82 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     operatorIds?: string[];
   };
 
-  await prisma.$transaction(async (tx) => {
-    // 修改昵称（同时更新用户名）
-    if (nickname !== undefined) {
-      const trimmed = String(nickname).trim();
-      if (!trimmed) return fail("昵称不能为空");
-      if (trimmed.startsWith("MMR丨")) return fail("昵称无需包含 MMR丨 前缀");
-      const newUsername = buildUsername(trimmed);
-      if (newUsername !== user.name) {
-        const existing = await tx.user.findUnique({ where: { username: newUsername } });
-        if (existing && existing.id !== user.id) return fail("该昵称已被使用");
-      }
-      await tx.user.update({
-        where: { id: user.id },
-        data: { nickname: trimmed, username: newUsername },
-      });
-    }
-
-    // 修改密码
-    if (password !== undefined && password !== null && password !== "") {
-      if (String(password).length < 6) return fail("密码至少 6 位");
-      const passwordHash = await bcrypt.hash(String(password), 10);
-      await tx.user.update({
-        where: { id: user.id },
-        data: { passwordHash },
-      });
-    }
-
-    // 更新能力
-    if (abilityIds !== undefined) {
-      await tx.userAbility.deleteMany({ where: { userId: user.id } });
-      if (abilityIds.length > 0) {
-        await tx.userAbility.createMany({
-          data: abilityIds.map((abilityId: string) => ({ userId: user.id, abilityId })),
+  // 事务内的校验错误以 throw 抛出，由外层 catch 统一转为 fail 响应
+  // （事务回调内的 return fail() 只会退出回调，不会中止 handler，导致校验被跳过）
+  try {
+    await prisma.$transaction(async (tx) => {
+      // 修改昵称（同时更新用户名）
+      if (nickname !== undefined) {
+        const trimmed = String(nickname).trim();
+        if (!trimmed) throw new Error("昵称不能为空");
+        if (trimmed.startsWith("MMR丨")) throw new Error("昵称无需包含 MMR丨 前缀");
+        const newUsername = buildUsername(trimmed);
+        if (newUsername !== user.name) {
+          const existing = await tx.user.findUnique({ where: { username: newUsername } });
+          if (existing && existing.id !== user.id) throw new Error("该昵称已被使用");
+        }
+        await tx.user.update({
+          where: { id: user.id },
+          data: { nickname: trimmed, username: newUsername },
         });
       }
-    }
 
-    // 更新职责
-    if (dutyIds !== undefined) {
-      await tx.userDuty.deleteMany({ where: { userId: user.id } });
-      if (dutyIds.length > 0) {
-        await tx.userDuty.createMany({
-          data: dutyIds.map((dutyId: string) => ({ userId: user.id, dutyId })),
+      // 修改密码
+      if (password !== undefined && password !== null && password !== "") {
+        if (String(password).length < 6) throw new Error("密码至少 6 位");
+        const passwordHash = await bcrypt.hash(String(password), 10);
+        await tx.user.update({
+          where: { id: user.id },
+          data: { passwordHash },
         });
       }
-    }
 
-    // 更新干员
-    if (operatorIds !== undefined) {
-      await tx.userOperator.deleteMany({ where: { userId: user.id } });
-      if (operatorIds.length > 0) {
-        await tx.userOperator.createMany({
-          data: operatorIds.map((operatorId: string) => ({
-            userId: user.id,
-            operatorId,
-          })),
-        });
+      // 更新能力
+      if (abilityIds !== undefined) {
+        await tx.userAbility.deleteMany({ where: { userId: user.id } });
+        if (abilityIds.length > 0) {
+          await tx.userAbility.createMany({
+            data: abilityIds.map((abilityId: string) => ({ userId: user.id, abilityId })),
+          });
+        }
       }
-    }
-  });
+
+      // 更新职责
+      if (dutyIds !== undefined) {
+        await tx.userDuty.deleteMany({ where: { userId: user.id } });
+        if (dutyIds.length > 0) {
+          await tx.userDuty.createMany({
+            data: dutyIds.map((dutyId: string) => ({ userId: user.id, dutyId })),
+          });
+        }
+      }
+
+      // 更新干员
+      if (operatorIds !== undefined) {
+        await tx.userOperator.deleteMany({ where: { userId: user.id } });
+        if (operatorIds.length > 0) {
+          await tx.userOperator.createMany({
+            data: operatorIds.map((operatorId: string) => ({
+              userId: user.id,
+              operatorId,
+            })),
+          });
+        }
+      }
+    });
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    // 已知的校验错误 → 400
+    if (VALIDATION_ERRORS.has(msg)) return fail(msg);
+    throw e; // 未知错误交由 withErrorHandler 处理
+  }
 
   return ok({ success: true });
 });
+
+const VALIDATION_ERRORS = new Set([
+  "昵称不能为空",
+  "昵称无需包含 MMR丨 前缀",
+  "该昵称已被使用",
+  "密码至少 6 位",
+]);

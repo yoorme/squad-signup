@@ -8,7 +8,7 @@ import { ok, fail, withErrorHandler } from "@/lib/api";
 //   - targetSquadId 为 null 表示移到替补
 //   - expectedSquadId 为前端拖拽开始时该队员所在分队（用于检测中间状态变化）
 //
-// 并发策略（针对 SQLite 优化）：
+// 并发策略：
 // - 不使用长事务
 // - 使用条件 updateMany 实现乐观锁：仅当 squadId 仍为 expected 时才更新
 // - 容量校验使用原子 count

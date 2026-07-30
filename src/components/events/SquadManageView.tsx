@@ -37,6 +37,7 @@ interface EventDetail {
   eventTime: string;
   status: "UPCOMING" | "ARCHIVED";
   requiredCount: number;
+  format: "BO3" | "BO5" | "R2" | null;
   nature: { id: string; name: string };
   name: { id: string; name: string };
   squads: Squad[];
@@ -53,8 +54,7 @@ interface Props {
   disabled?: boolean;
 }
 
-const GAP = 16; // 分队行之间间隔
-const DOUBLE_GAP = 32; // 分队区与替补区的间隔（2 倍）
+const DOUBLE_GAP = 32; // 分队区与替补区的间隔
 
 export function SquadManageView({ event, onChanged, disabled }: Props) {
   const toast = useToast();

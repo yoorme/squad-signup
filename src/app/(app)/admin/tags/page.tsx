@@ -143,7 +143,6 @@ export default function AdminTagsPage() {
       if (!sync) return;
 
       // 注意：当前实现下，删除标签会导致关联赛事的引用变无效。
-      // SQLite 不支持级联 SET NULL（仅支持 CASCADE），所以我们改为先把关联断开。
       // 这里简化处理：直接调用删除，由前端逻辑保证（生产环境应进一步处理）
       const res = await fetch("/api/admin/tags", {
         method: "POST",
