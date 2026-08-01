@@ -66,22 +66,21 @@ export function AssignView({ eventId, onClose }: Props) {
   useEffect(() => { load(); }, [eventId]);
 
   // 拖拽结束：把队员移到目标容器（某分队或替补池）
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
+  // 注意：参数名用 dragEvent 避免与 state 变量 event 遮蔽
+  const handleDragEnd = async (dragEvent: DragEndEvent) => {
+    const { active, over } = dragEvent;
     if (!over) return;
     const regId = String(active.id);
     const targetId = String(over.id); // "sub" 或 squad.id
     const targetSquadId = targetId === "sub" ? null : targetId;
 
-    if (!event) return;
-    // 判断是否已在目标容器中
+    if (!event) return; // 赛事数据未加载
+    // 判断当前所在容器，避免同容器内无意义的移动
     const inSquad = event.squads.find((s) => s.members.some((m) => m.registrationId === regId));
-    const inSub = event.substitutes.some((m) => m.registrationId === regId);
     const currentContainer = inSquad ? inSquad.id : "sub";
-    if (currentContainer === targetId) return; // 同容器内不动
+    if (currentContainer === targetId) return;
 
     // 乐观更新：立即从源移除、加入目标
-    let movedMember: Member | undefined;
     setEvent((prev) => {
       if (!prev) return prev;
       let member: Member | undefined;
@@ -99,8 +98,7 @@ export function AssignView({ eventId, onClose }: Props) {
         member = prev.substitutes[subIdx];
         substitutes = prev.substitutes.filter((_, i) => i !== subIdx);
       }
-      if (!member) return prev;
-      movedMember = member;
+      if (!member) return prev; // 找不到该队员，不更新
       if (targetSquadId === null) {
         substitutes = [...substitutes, member];
       } else {
