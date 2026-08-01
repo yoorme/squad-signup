@@ -204,13 +204,28 @@ fetch_code() {
 }
 
 # ---------------- 生成 .env ----------------
+# 将值转义为 .env 安全的单引号格式：内部 ' 转义为 '\''
+# 单引号确保 source 时 $ 等元字符不被展开（密码含 $ 很常见）
+env_escape() {
+  local s="$1"
+  s="${s//\'/\'\\\'\'}"
+  printf "'%s'" "$s"
+}
+
 configure_env() {
   local env_file="$INSTALL_DIR/.env"
-  if [[ -f "$env_file" ]] && grep -q '^DATABASE_URL=' "$env_file"; then
-    ok ".env 已存在，保留配置"
-    # 加载到当前环境，供后续构建/启动使用
-    set -a; . "$env_file"; set +a
-    return 0
+  # 检查 .env 是否有效：存在且 DATABASE_URL 非空（空值会导致 prisma migrate 报晦涩错误）
+  if [[ -f "$env_file" ]]; then
+    local existing_db
+    existing_db=$(grep '^DATABASE_URL=' "$env_file" 2>/dev/null | sed -E "s/^DATABASE_URL=//; s/^['\"]//; s/['\"]$//")
+    if [[ -n "$existing_db" ]]; then
+      ok ".env 已存在，保留配置"
+      # 加载到当前环境，供后续构建/启动使用
+      set -a; . "$env_file"; set +a
+      return 0
+    else
+      warn ".env 中 DATABASE_URL 为空，重新配置"
+    fi
   fi
 
   log "配置环境变量（.env）"
@@ -250,16 +265,17 @@ EOF
   fi
   ask site_url "站点 URL（NEXTAUTH_URL）" "$site_url"
 
-  cat > "$env_file" <<EOF
-# 由 install.sh 生成 $(date '+%Y-%m-%d %H:%M:%S')
-DATABASE_URL="$db_url"
-DIRECT_URL="$direct_url"
-AUTH_SECRET="$auth_secret"
-INITIAL_ADMIN_USERNAME="$admin_user"
-INITIAL_ADMIN_PASSWORD="$admin_pass"
-NEXTAUTH_URL="$site_url"
-AUTH_TRUST_HOST="$trust_host"
-EOF
+  # 用单引号写入：source 时 $ 等元字符不被展开，密码含特殊字符也安全
+  {
+    echo "# 由 install.sh 生成 $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "DATABASE_URL=$(env_escape "$db_url")"
+    echo "DIRECT_URL=$(env_escape "$direct_url")"
+    echo "AUTH_SECRET=$(env_escape "$auth_secret")"
+    echo "INITIAL_ADMIN_USERNAME=$(env_escape "$admin_user")"
+    echo "INITIAL_ADMIN_PASSWORD=$(env_escape "$admin_pass")"
+    echo "NEXTAUTH_URL=$(env_escape "$site_url")"
+    echo "AUTH_TRUST_HOST=$(env_escape "$trust_host")"
+  } > "$env_file"
   chmod 600 "$env_file"
   ok ".env 已生成"
   # 加载到当前环境
@@ -305,6 +321,17 @@ build_app() {
 # ---------------- 服务管理 ----------------
 node_bin_path() { command -v node || die "找不到 node"; }
 run_user() { printf '%s' "${SUDO_USER:-$(whoami)}"; }
+
+# sudo 安装时文件属主为 root，但 systemd 服务以 SUDO_USER 运行
+# chown 安装目录确保服务用户有读写权限（next start 可能写缓存/上传文件）
+chown_install_dir() {
+  if [[ ${EUID:-$(id -u)} -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]]; then
+    local user="$SUDO_USER"
+    local group; group=$(id -gn "$user" 2>/dev/null || echo "$user")
+    chown -R "$user:$group" "$INSTALL_DIR" 2>/dev/null || true
+    ok "已将 $INSTALL_DIR 属主设为 $user"
+  fi
+}
 
 setup_systemd() {
   local node_bin; node_bin=$(node_bin_path)
@@ -440,6 +467,7 @@ do_install() {
   load_deploy_conf
   configure_env
   build_app
+  chown_install_dir
   if has_systemd; then setup_systemd; else setup_nohup; fi
   start_service
   print_summary
@@ -454,6 +482,7 @@ do_update() {
   fetch_code
   configure_env   # 已有 .env 时仅加载，不重新询问
   build_app
+  chown_install_dir
   if has_systemd; then
     setup_systemd   # 重建 unit 以更新 node 路径/端口
     start_service
@@ -472,8 +501,18 @@ do_uninstall() {
     rm -f /etc/systemd/system/squad-signup.service
     systemctl daemon-reload 2>/dev/null || true
   else
+    # 优先用 stop.sh（新版有进程组清理）；兜底直接读 .pid 杀进程（兼容旧版安装）
     if [[ -f "$INSTALL_DIR/stop.sh" ]]; then
       bash "$INSTALL_DIR/stop.sh" 2>/dev/null || true
+    fi
+    if [[ -f "$INSTALL_DIR/.pid" ]]; then
+      local pid; pid=$(cat "$INSTALL_DIR/.pid" 2>/dev/null || true)
+      if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+        sleep 1
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+      rm -f "$INSTALL_DIR/.pid"
     fi
   fi
   if is_interactive; then
