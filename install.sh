@@ -186,32 +186,44 @@ ensure_base_tools() {
 
 # ---------------- 内存保护（避免构建时 OOM 崩溃） ----------------
 # 小内存服务器（2G）构建 Next.js 时极易 OOM，自动创建 swap 兜底
+# next build 峰值需 3-4G，物理内存 2G + swap 4G = 6G 才保险
 ensure_swap() {
   local swap_mb mem_mb
   swap_mb=$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-  if (( swap_mb >= 2048 )); then
+  if (( swap_mb >= 4096 )); then
     ok "Swap 已有 ${swap_mb}MB，构建内存充足"
     return 0
   fi
   if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-    warn "Swap 不足（${swap_mb}MB < 2048MB）且非 root 无法创建，构建可能 OOM 崩溃"
+    warn "Swap 不足（${swap_mb}MB < 4096MB）且非 root 无法创建，构建可能 OOM 崩溃"
     return 0
   fi
   mem_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-  if (( mem_mb >= 4096 )); then
+  if (( mem_mb >= 8192 )); then
     ok "物理内存 ${mem_mb}MB 充足，跳过 swap"
     return 0
   fi
-  warn "Swap 不足（${swap_mb}MB）+ 物理内存 ${mem_mb}MB，构建易 OOM，自动创建 2G swap..."
+  warn "Swap 不足（${swap_mb}MB）+ 物理内存 ${mem_mb}MB，构建易 OOM，自动创建 4G swap..."
   local swapfile="/swapfile"
   if [[ ! -f "$swapfile" ]]; then
-    fallocate -l 2G "$swapfile" 2>/dev/null || dd if=/dev/zero of="$swapfile" bs=1M count=2048
+    fallocate -l 4G "$swapfile" 2>/dev/null || dd if=/dev/zero of="$swapfile" bs=1M count=4096
     chmod 600 "$swapfile"
     mkswap "$swapfile"
   fi
   swapon "$swapfile" 2>/dev/null || true
   grep -q "$swapfile" /etc/fstab 2>/dev/null || echo "$swapfile none swap sw 0 0" >> /etc/fstab
-  ok "Swap 已创建并启用（2G），构建内存已保障"
+  ok "Swap 已创建并启用（4G），构建内存已保障"
+}
+
+# 构建前停止正在运行的服务，释放内存给构建用（next 进程常驻占 200-500MB）
+stop_service_for_build() {
+  if has_systemd; then
+    systemctl stop squad-signup 2>/dev/null || true
+    ok "已停止服务，释放内存给构建"
+  elif [[ -f "$INSTALL_DIR/stop.sh" ]]; then
+    bash "$INSTALL_DIR/stop.sh" 2>/dev/null || true
+    ok "已停止服务，释放内存给构建"
+  fi
 }
 
 # 打补丁：next.config 跳过类型检查和 lint（类型检查是 OOM 主要元凶）
@@ -353,9 +365,11 @@ load_deploy_conf() {
 
 # ---------------- 构建 ----------------
 # 分步构建：不使用 npm run build（它会跑类型检查导致 OOM）
-# 1. 确保内存（swap） 2. 打补丁跳过类型检查 3. 分步执行迁移+构建 4. 限制 node 内存
+# 1. 停止服务释放内存 2. 确保 swap 3. 打补丁跳过类型检查
+# 4. 分步执行迁移+构建 5. 限制 node 内存 6. 失败不启动
 build_app() {
   cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
+  stop_service_for_build
   ensure_swap
   patch_next_config
   log "安装依赖（npm install）..."

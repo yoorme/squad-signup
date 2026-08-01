@@ -2,15 +2,15 @@
 # squad-signup 服务器更新脚本（裸机部署）
 # 用法：bash update.sh
 #
-# 自动完成：检查 swap → 拉取代码 → 跳过类型检查补丁 →
-#           安装依赖 → 数据库迁移 → 构建（限制内存）→ 重启服务
+# 自动完成：停服务释放内存 → 检查 swap → 拉代码 → 跳过类型检查补丁 →
+#           安装依赖 → 数据库迁移 → 构建（限制内存）→ 启动服务
 #
-# 安全保障：
-#   1. 自动创建 swap（小内存服务器构建时避免 OOM 崩溃）
-#   2. 跳过类型检查（OOM 主要元凶）
-#   3. 限制 node 内存 2G
-#   4. 构建失败时不重启服务（保持旧版本运行）
-#   5. 重启前先停止（避免端口冲突）
+# 防崩溃保障：
+#   1. 构建前先停服务（释放 200-500MB 内存给构建用）
+#   2. 自动创建 4G swap（next build 峰值需 3-4G）
+#   3. 跳过类型检查（OOM 主要元凶）
+#   4. 限制 node 内存 2G
+#   5. 构建失败时不启动服务（保持原版本运行，但服务已停需手动启动）
 set -euo pipefail
 
 INSTALL_DIR="/opt/squad-signup"
@@ -20,39 +20,43 @@ cd "$INSTALL_DIR" || { echo "✗ 无法进入 $INSTALL_DIR"; exit 1; }
 ensure_swap() {
   local swap_mb mem_mb
   swap_mb=$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-  if (( swap_mb >= 2048 )); then
+  if (( swap_mb >= 4096 )); then
     echo "✓ Swap 已有 ${swap_mb}MB，构建内存充足"
     return 0
   fi
   if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-    echo "! Swap 不足（${swap_mb}MB < 2048MB）且非 root，构建可能 OOM"
+    echo "! Swap 不足（${swap_mb}MB < 4096MB）且非 root，构建可能 OOM"
     return 0
   fi
   mem_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-  if (( mem_mb >= 4096 )); then
+  if (( mem_mb >= 8192 )); then
     echo "✓ 物理内存 ${mem_mb}MB 充足，跳过 swap"
     return 0
   fi
-  echo "! Swap 不足（${swap_mb}MB）+ 物理内存 ${mem_mb}MB，自动创建 2G swap..."
+  echo "! Swap 不足（${swap_mb}MB）+ 物理内存 ${mem_mb}MB，自动创建 4G swap..."
   if [[ ! -f /swapfile ]]; then
-    fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048
+    fallocate -l 4G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=4096
     chmod 600 /swapfile
     mkswap /swapfile
   fi
   swapon /swapfile 2>/dev/null || true
   grep -q '/swapfile' /etc/fstab 2>/dev/null || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-  echo "✓ Swap 已创建并启用（2G）"
+  echo "✓ Swap 已创建并启用（4G）"
 }
 
-echo "▶ 1/6 检查内存与 swap..."
+echo "▶ 1/7 停止服务（释放内存给构建用）..."
+systemctl stop squad-signup 2>/dev/null || true
+echo "✓ 服务已停止"
+
+echo "▶ 2/7 检查内存与 swap..."
 ensure_swap
 
-echo "▶ 2/6 拉取最新代码..."
+echo "▶ 3/7 拉取最新代码..."
 git fetch --quiet origin main
 git reset --hard origin/main
 echo "✓ 代码已更新"
 
-echo "▶ 3/6 应用构建补丁（跳过类型检查，避免 OOM）..."
+echo "▶ 4/7 应用构建补丁（跳过类型检查，避免 OOM）..."
 # git pull 会还原 next.config.ts，这里重新写入跳过类型检查的配置
 cat > next.config.ts <<'PATCH'
 import type { NextConfig } from "next";
@@ -78,25 +82,24 @@ export default nextConfig;
 PATCH
 echo "✓ 补丁已应用"
 
-echo "▶ 4/6 安装依赖..."
+echo "▶ 5/7 安装依赖..."
 npm ci --no-audit --no-fund
 
-echo "▶ 5/6 数据库迁移 + 构建..."
+echo "▶ 6/7 数据库迁移 + 构建..."
 set -a; . ./.env; set +a
 npx prisma migrate deploy
 npx tsx prisma/seed.ts
 
-# 构建：限制内存，失败则不重启服务（保持旧版本运行，避免服务挂掉）
+# 构建：限制内存，失败则不启动服务（保持原版本，但服务已停需手动启动）
 if ! NODE_OPTIONS="--max-old-space-size=2048" npx next build; then
-  echo "✗ 构建失败，服务保持当前版本运行，请查看上方错误日志"
+  echo "✗ 构建失败！原版本文件已被 git 覆盖，但数据库未受影响"
+  echo "  请查看上方错误日志，修复后重新运行 bash update.sh"
+  echo "  如需紧急恢复服务，可手动启动旧版：systemctl start squad-signup"
   exit 1
 fi
 echo "✓ 构建完成"
 
-echo "▶ 6/6 重启服务..."
-# 先停止确保端口释放，再启动（避免新旧进程端口冲突）
-systemctl stop squad-signup 2>/dev/null || true
-sleep 1
+echo "▶ 7/7 启动服务..."
 systemctl start squad-signup
 sleep 2
 if systemctl is-active --quiet squad-signup; then
