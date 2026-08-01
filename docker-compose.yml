@@ -19,6 +19,12 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    # 日志大小限制，防止日志撑满磁盘
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Next.js 应用
   app:
@@ -46,6 +52,20 @@ services:
     ports:
       # 对外暴露 3000 端口；1Panel 反向代理指向此端口
       - "3000:3000"
+    # 健康检查：应用崩溃但进程未退出时也能自动重启
+    # 用 wget 跟随重定向，登录页 302 也算存活
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    # 日志大小限制，防止日志撑满磁盘
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   pgdata:

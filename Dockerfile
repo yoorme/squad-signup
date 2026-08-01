@@ -31,8 +31,12 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-# 安装运行时需要的 CLI 工具
-RUN npm i -g tsx prisma
+# 安装运行时需要的 CLI 工具（锁定 prisma 大版本，与 package.json 保持一致）
+RUN npm i -g tsx prisma@6
+
+# bcryptjs 用于 docker-entrypoint.sh 中 seed 脚本的密码加密
+# （standalone 模式不打包非追踪依赖，需在运行阶段单独安装）
+RUN npm i bcryptjs
 
 # 仅复制运行时所需文件
 COPY --from=builder /app/public ./public
