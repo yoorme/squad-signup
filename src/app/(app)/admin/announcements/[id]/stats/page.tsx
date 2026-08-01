@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { formatDateTime } from "@/lib/constants";
+import { Loading } from "@/components/ui/StateView";
 
 interface Stats {
   totalUsers: number;
@@ -32,7 +33,7 @@ export default function AnnouncementStatsPage() {
       });
   }, [params.id]);
 
-  if (loading) return <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>;
+  if (loading) return <Loading />;
   if (!stats) return <div className="win-card" style={{ padding: 40, textAlign: "center" }}>无数据</div>;
 
   const readRate = stats.totalUsers > 0 ? Math.round((stats.readCount / stats.totalUsers) * 100) : 0;

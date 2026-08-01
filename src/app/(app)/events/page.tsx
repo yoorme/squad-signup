@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { formatDateTime } from "@/lib/constants";
+import { Loading } from "@/components/ui/StateView";
 
 interface Nature { id: string; name: string; }
 interface Name { id: string; name: string; }
@@ -81,7 +82,7 @@ export default function EventsPage() {
       </div>
 
       {loading ? (
-        <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>
+        <Loading />
       ) : events.length === 0 ? (
         <div className="win-card" style={{ padding: 40, textAlign: "center", color: "var(--win-text-tertiary)" }}>
           暂无赛事

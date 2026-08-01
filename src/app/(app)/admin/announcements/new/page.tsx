@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useToast } from "@/components/ui/Toast";
 import { Markdown } from "@/components/ui/Markdown";
+import { Loading } from "@/components/ui/StateView";
 
 interface ImageItem { id?: string; path: string; }
 
@@ -104,7 +105,7 @@ export default function AnnouncementEditorPage() {
   };
 
   if (loading) {
-    return <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>;
+    return <Loading />;
   }
 
   return (

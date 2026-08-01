@@ -7,6 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { Modal } from "@/components/ui/Modal";
 import { formatDateTime } from "@/lib/constants";
+import { Loading } from "@/components/ui/StateView";
 
 interface UserItem {
   id: string;
@@ -20,7 +21,7 @@ interface UserItem {
 
 export default function AdminUsersPage() {
   const { data: session } = useSession();
-  const myId = (session?.user as any)?.id;
+  const myId = session?.user?.id;
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -117,7 +118,7 @@ export default function AdminUsersPage() {
       </p>
 
       {loading ? (
-        <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>
+        <Loading />
       ) : (
         <div className="win-card" style={{ overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>

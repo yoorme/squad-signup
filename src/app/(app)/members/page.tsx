@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { formatDateTime } from "@/lib/constants";
+import { Loading } from "@/components/ui/StateView";
 
 interface Ability { id: string; name: string; category: "INFANTRY" | "VEHICLE"; }
 interface Duty { id: string; name: string; }
@@ -58,7 +59,7 @@ export default function MembersPage() {
       </div>
 
       {loading ? (
-        <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>
+        <Loading />
       ) : filtered.length === 0 ? (
         <div className="win-card" style={{ padding: 40, textAlign: "center", color: "var(--win-text-tertiary)" }}>
           {keyword.trim() ? "未找到匹配的队员" : "暂无队员"}

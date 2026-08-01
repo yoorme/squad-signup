@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/ui/Toast";
 import { formatDateTime } from "@/lib/constants";
+import { Loading } from "@/components/ui/StateView";
 
 interface AnnouncementListItem {
   id: string;
@@ -40,7 +41,7 @@ export default function AnnouncementsPage() {
       </div>
 
       {loading ? (
-        <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>
+        <Loading />
       ) : items.length === 0 ? (
         <div className="win-card" style={{ padding: 40, textAlign: "center", color: "var(--win-text-tertiary)" }}>
           暂无公告

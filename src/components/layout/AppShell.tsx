@@ -11,48 +11,14 @@ interface NavItem {
   badge?: number;
 }
 
-const defaultNavItems: NavItem[] = [
-  {
-    href: "/announcements",
-    label: "公告",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        {/* 喇叭锥体：左窄右宽，对称于 y=12 */}
-        <path d="M4 10v4h4l8 4V6l-8 4H4z" />
-        {/* 声波弧线 */}
-        <path d="M18.5 8.5a4 4 0 0 1 0 7" />
-      </svg>
-    ),
-  },
-  {
-    href: "/events",
-    label: "赛事",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <rect x="3" y="5" width="18" height="14" rx="2" />
-        <path d="M3 9h18M8 3v4M16 3v4" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-  {
-    href: "/me",
-    label: "我的",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <circle cx="12" cy="8" r="4" />
-        <path d="M4 20c0-4 4-6 8-6s8 2 8 6" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-];
-
 interface AppShellProps {
   children: ReactNode;
-  navItems?: NavItem[];
+  // 导航项由 (app)/layout.tsx 统一构造（含未读角标），此处不再提供默认值
+  navItems: NavItem[];
   showAdmin?: boolean;
 }
 
-export function AppShell({ children, navItems = defaultNavItems, showAdmin }: AppShellProps) {
+export function AppShell({ children, navItems, showAdmin }: AppShellProps) {
   const pathname = usePathname();
 
   const adminItem: NavItem = {

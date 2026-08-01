@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useToast } from "@/components/ui/Toast";
 import { calculateSquadCount } from "@/lib/constants";
+import { Loading } from "@/components/ui/StateView";
 
 interface TagItem { id: string; name: string; }
 interface Tags {
@@ -125,7 +126,7 @@ export default function NewEventPage() {
   };
 
   if (loading) {
-    return <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>;
+    return <Loading />;
   }
 
   return (

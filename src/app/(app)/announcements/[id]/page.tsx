@@ -8,6 +8,7 @@ import { Markdown } from "@/components/ui/Markdown";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { formatDateTime } from "@/lib/constants";
+import { Loading } from "@/components/ui/StateView";
 
 interface AnnouncementDetail {
   id: string;
@@ -39,7 +40,7 @@ export default function AnnouncementDetailPage() {
   const [commentText, setCommentText] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
 
-  const isAdmin = (session?.user as any)?.role === "ADMIN";
+  const isAdmin = session?.user?.role === "ADMIN";
 
   const load = async () => {
     setLoading(true);
@@ -129,7 +130,7 @@ export default function AnnouncementDetailPage() {
   };
 
   if (loading) {
-    return <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>;
+    return <Loading />;
   }
   if (!detail) {
     return <div className="win-card" style={{ padding: 40, textAlign: "center" }}>公告不存在</div>;

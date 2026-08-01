@@ -1,121 +1,73 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
+import useSWR from "swr";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
+import { Loading, ErrorState } from "@/components/ui/StateView";
 import { formatDateTime } from "@/lib/constants";
-
-interface Ability { id: string; name: string; category: string; }
-interface Duty { id: string; name: string; }
-interface Member {
-  registrationId: string;
-  userId: string;
-  username: string;
-  nickname: string;
-  abilities: Ability[];
-  duties: Duty[];
-}
-interface Squad {
-  id: string;
-  index: number;
-  capacity: number;
-  nature: { id: string; name: string };
-  registeredCount: number;
-  members: Member[];
-}
-interface EventDetail {
-  id: string;
-  title: string;
-  eventTime: string;
-  status: "UPCOMING" | "ARCHIVED";
-  requiredCount: number;
-  format: "BO3" | "BO5" | "R2" | null;
-  nature: { id: string; name: string };
-  name: { id: string; name: string } | null;
-  customName: string | null;
-  map: { id: string; name: string } | null;
-  squads: Squad[];
-  substitutes: Member[];
-  totalRegistered: number;
-  totalSubstitutes: number;
-  myRegistration: { squadId: string | null; isSubstitute: boolean } | null;
-  version?: string;
-}
+import { fetcher } from "@/lib/fetcher";
+import type { EventDetail, EventMember, MyRegistration } from "@/types";
 
 export default function EventDetailPage() {
   const params = useParams<{ id: string }>();
   const { data: session } = useSession();
   const toast = useToast();
   const confirm = useConfirm();
-  const myUserId = (session?.user as any)?.id;
+  const myUserId = session?.user?.id;
 
-  const [event, setEvent] = useState<EventDetail | null>(null);
-  const [loading, setLoading] = useState(true);
+  // SWR 数据层：15 秒自动轮询（归档后停止）、页面重新聚焦时刷新、请求去重
+  const {
+    data: event,
+    error,
+    isLoading,
+    mutate,
+  } = useSWR<EventDetail>(
+    params.id ? `/api/events?id=${encodeURIComponent(params.id)}` : null,
+    fetcher,
+    {
+      refreshInterval: (latest) => (latest?.status === "ARCHIVED" ? 0 : 15000),
+      revalidateOnFocus: true,
+    }
+  );
+
   // 记录上一次已知版本号，用于检测后台轮询拉到的新数据是否真的有变化
   const lastVersionRef = useRef<string | undefined>(undefined);
-  // 标记下一次 load 是用户自己的操作触发的，不应弹“数据已同步”提示
+  // 标记下一次刷新是用户自己的操作触发的，不应弹"数据已同步"提示
   const skipSyncToastRef = useRef(false);
 
-  const load = async (silent = false) => {
-    if (!silent) setLoading(true);
-    // 仅拉取当前赛事详情，避免拉全量列表
-    const res = await fetch(`/api/events?id=${encodeURIComponent(params.id)}`);
-    const data = await res.json();
-    if (data.ok) {
-      const found: EventDetail | null = data.data;
-      if (found) {
-        // 若静默刷新发现版本号变化，提示用户数据已更新
-        // 但如果是用户自己刚操作触发的刷新，则跳过提示
-        // 注意：用 !== undefined 判断"非首次加载"，避免空字符串 version 被当作 falsy 漏掉提示
-        if (
-          silent &&
-          !skipSyncToastRef.current &&
-          lastVersionRef.current !== undefined &&
-          lastVersionRef.current !== found.version
-        ) {
-          toast("数据已同步至最新", "info");
-        }
-        skipSyncToastRef.current = false;
-        lastVersionRef.current = found.version;
-        setEvent(found);
-      } else {
-        setEvent(null);
-      }
-    } else if (res.status === 404) {
-      setEvent(null);
+  useEffect(() => {
+    if (!event) return;
+    if (
+      lastVersionRef.current !== undefined &&
+      lastVersionRef.current !== event.version &&
+      !skipSyncToastRef.current
+    ) {
+      toast("数据已同步至最新", "info");
     }
-    if (!silent) setLoading(false);
-  };
+    skipSyncToastRef.current = false;
+    lastVersionRef.current = event.version;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event?.version]);
 
   // 用户主动操作后的刷新：不弹同步提示
   const reloadAfterMutation = () => {
     skipSyncToastRef.current = true;
-    return load(false);
+    return mutate();
   };
 
-  // 初次加载
-  useEffect(() => { if (params.id) load(); }, [params.id]);
-
-  // 后台静默轮询：每 15 秒拉一次最新状态，避免用户长期看过期数据
-  useEffect(() => {
-    if (!event || event.status === "ARCHIVED") return;
-    const timer = setInterval(() => load(true), 15000);
-    // 页面重新可见时立即刷新一次
-    const onVisible = () => {
-      if (document.visibilityState === "visible") load(true);
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [event?.id, event?.status]);
-
-  if (loading) {
-    return <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>;
+  if (isLoading) {
+    return <Loading />;
+  }
+  if (error) {
+    const status = (error as { status?: number }).status;
+    if (status === 404) {
+      return <div className="win-card" style={{ padding: 40, textAlign: "center" }}>赛事不存在</div>;
+    }
+    return <ErrorState message={error.message || "加载失败"} onRetry={() => mutate()} />;
   }
   if (!event) {
     return <div className="win-card" style={{ padding: 40, textAlign: "center" }}>赛事不存在</div>;
@@ -271,7 +223,7 @@ function SquadDisplayView({
   onCancel,
 }: {
   event: EventDetail;
-  myReg: { squadId: string | null; isSubstitute: boolean } | null;
+  myReg: MyRegistration | null;
   myUserId?: string;
   onRegister: (squadId: string | null, asSubstitute: boolean) => void;
   onCancel: () => void;
@@ -383,7 +335,7 @@ function SquadDisplayView({
 }
 
 // 成员 chip - 点击跳转到队员详情页
-function MemberChip({ member, isMe }: { member: Member; isMe?: boolean }) {
+function MemberChip({ member, isMe }: { member: EventMember; isMe?: boolean }) {
   const duty = member.duties.find((d) => d.name !== "无");
   const abilityLabels = member.abilities.map((a) => a.name).slice(0, 3);
   return (

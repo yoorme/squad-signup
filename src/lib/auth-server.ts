@@ -7,12 +7,7 @@ export async function requireUser() {
   if (!session?.user) {
     throw new Error("UNAUTHORIZED");
   }
-  return session.user as any as {
-    id: string;
-    name: string;
-    nickname: string;
-    role: Role;
-  };
+  return session.user;
 }
 
 // 强制要求管理员，否则抛错

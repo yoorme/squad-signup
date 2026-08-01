@@ -5,6 +5,7 @@ import { signOut, useSession } from "next-auth/react";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { NAME_PREFIX } from "@/lib/constants";
+import { Loading } from "@/components/ui/StateView";
 
 interface Ability { id: string; name: string; category: "INFANTRY" | "VEHICLE"; sortOrder: number; }
 interface Duty { id: string; name: string; sortOrder: number; }
@@ -155,7 +156,7 @@ export default function MePage() {
   };
 
   if (!info) {
-    return <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>;
+    return <Loading />;
   }
 
   const infantryAbilities = options.abilities.filter((a) => a.category === "INFANTRY");

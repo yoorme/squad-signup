@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { formatDateTime } from "@/lib/constants";
+import { Loading } from "@/components/ui/StateView";
 
 interface Ability { id: string; name: string; category: "INFANTRY" | "VEHICLE"; }
 interface Duty { id: string; name: string; }
@@ -36,7 +37,7 @@ export default function MemberDetailPage() {
   }, [params.id]);
 
   if (loading) {
-    return <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>;
+    return <Loading />;
   }
   if (!member) {
     return (

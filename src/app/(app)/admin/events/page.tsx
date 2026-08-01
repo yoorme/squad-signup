@@ -4,31 +4,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
+import { Loading, Empty } from "@/components/ui/StateView";
 import { formatDateTime } from "@/lib/constants";
 import { TagEditor } from "@/components/events/TagEditor";
 import { AssignView } from "@/components/events/AssignView";
+import type { EventSummary, EventManagePatch } from "@/types";
 
-interface Squad {
-  id: string;
-  index: number;
-  capacity: number;
-  nature: { id: string; name: string };
-  registeredCount: number;
-}
-interface EventItem {
-  id: string;
-  title: string;
-  eventTime: string;
-  status: "UPCOMING" | "ARCHIVED";
-  requiredCount: number;
-  format: "BO3" | "BO5" | "R2" | null;
-  nature: { id: string; name: string };
-  name: { id: string; name: string } | null;
-  customName: string | null;
-  opponent: string | null;
-  map: { id: string; name: string } | null;
-  squads: Squad[];
-}
+// 管理页的赛事条目与列表 API 返回结构一致
+type EventItem = EventSummary;
 
 export default function AdminEventsPage() {
   const toast = useToast();
@@ -85,10 +68,7 @@ export default function AdminEventsPage() {
   };
 
   // 保存赛事标签/赛制/分队性质/地图
-  const handleSaveEdit = async (
-    ev: EventItem,
-    patch: { natureId?: string; nameId?: string | null; customName?: string | null; opponent?: string | null; mapId?: string | null; format?: "BO3" | "BO5" | "R2" | null; squads?: { id: string; natureId: string }[] }
-  ) => {
+  const handleSaveEdit = async (ev: EventItem, patch: EventManagePatch) => {
     const res = await fetch("/api/events/manage", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -136,10 +116,10 @@ export default function AdminEventsPage() {
       </div>
 
       {loading ? (
-        <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>
+        <Loading />
       ) : events.length === 0 ? (
-        <div className="win-card" style={{ padding: 40, textAlign: "center", color: "var(--win-text-tertiary)" }}>
-          暂无赛事
+        <div className="win-card" style={{ overflow: "hidden" }}>
+          <Empty text="暂无赛事" />
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -183,7 +163,7 @@ function EventEditCard({
   assigning: boolean;
   onToggleEdit: () => void;
   onToggleAssign: () => void;
-  onSave: (ev: EventItem, patch: any) => void;
+  onSave: (ev: EventItem, patch: EventManagePatch) => void;
   onArchiveToggle: () => void;
   onDelete: () => void;
 }) {
@@ -400,7 +380,7 @@ function EventEditCard({
               style={{ fontSize: 13 }}
               disabled={!dirty}
               onClick={() => {
-                const patch: any = {};
+                const patch: EventManagePatch = {};
                 if (natureId !== ev.nature.id) patch.natureId = natureId;
                 // 赛事名称：按模式发送 nameId（null=未知/其他）+ customName（其他时为输入值）
                 if (nameChanged) {

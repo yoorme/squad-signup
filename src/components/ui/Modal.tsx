@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 interface ModalProps {
   open: boolean;
@@ -12,22 +13,63 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, children, footer, maxWidth = "540px" }: ModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<Element | null>(null);
+
+  // Esc 关闭 + 打开时锁定 body 滚动 + 焦点管理
   useEffect(() => {
     if (!open) return;
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      // 简易焦点陷阱：Tab 在弹窗内循环
+      if (e.key === "Tab" && dialogRef.current) {
+        const focusables = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
+
+    previousFocusRef.current = document.activeElement;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // 打开后将焦点移入弹窗
+    dialogRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+      // 关闭后把焦点还给触发元素
+      if (previousFocusRef.current instanceof HTMLElement) {
+        previousFocusRef.current.focus();
+      }
+    };
   }, [open, onClose]);
 
   if (!open) return null;
 
-  return (
+  // Portal 到 body：避免被父级 overflow/transform/stacking context 裁剪或遮挡
+  return createPortal(
     <div className="win-modal-backdrop" onClick={onClose}>
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
         className="win-modal flex flex-col"
-        style={{ maxWidth }}
+        style={{ maxWidth, outline: "none" }}
         onClick={(e) => e.stopPropagation()}
       >
         {title && (
@@ -58,7 +100,8 @@ export function Modal({ open, onClose, title, children, footer, maxWidth = "540p
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

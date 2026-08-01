@@ -5,6 +5,6 @@ import { Role } from "@prisma/client";
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if ((session.user as any).role !== Role.ADMIN) redirect("/announcements");
+  if (session.user.role !== Role.ADMIN) redirect("/announcements");
   return <>{children}</>;
 }

@@ -3,14 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
+import { fetchTags, createTag, updateTag, deleteTag } from "@/lib/tag-api";
+import type { TagItem } from "@/types";
 
+// 本组件仅用于赛事表单内的四类赛事标签选择
 type TagType = "nature" | "name" | "squadNature" | "map";
-
-interface TagItem {
-  id: string;
-  name: string;
-  disabled?: boolean;
-}
 
 interface Props {
   type: TagType;
@@ -42,9 +39,7 @@ export function TagEditor({ type, selectedId, onSelect }: Props) {
   const longPressTimer = useRef<number | null>(null);
 
   const load = async () => {
-    const res = await fetch(`/api/admin/tags?type=${type}`);
-    const data = await res.json();
-    if (data.ok) setTags(data.data);
+    setTags(await fetchTags<TagItem>(type));
     setLoading(false);
   };
 
@@ -88,12 +83,7 @@ export function TagEditor({ type, selectedId, onSelect }: Props) {
       toast("名称不能为空", "warning");
       return;
     }
-    const res = await fetch("/api/admin/tags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, op: "update", id: menu.tag.id, name: editName.trim() }),
-    });
-    const data = await res.json();
+    const data = await updateTag(type, { id: menu.tag.id, name: editName.trim() });
     if (data.ok) {
       toast("已保存", "success");
       setMenu(null);
@@ -115,12 +105,7 @@ export function TagEditor({ type, selectedId, onSelect }: Props) {
       danger: true,
     });
     if (!yes) return;
-    const res = await fetch("/api/admin/tags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, op: "delete", id: tag.id }),
-    });
-    const data = await res.json();
+    const data = await deleteTag(type, tag.id);
     if (data.ok) {
       toast("已删除", "success");
       if (selectedId === tag.id) {
@@ -141,12 +126,7 @@ export function TagEditor({ type, selectedId, onSelect }: Props) {
       return;
     }
     const trimmed = newName.trim();
-    const res = await fetch("/api/admin/tags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, op: "create", name: trimmed }),
-    });
-    const data = await res.json();
+    const data = await createTag(type, { name: trimmed });
     if (data.ok) {
       toast("已添加", "success");
       setNewName("");

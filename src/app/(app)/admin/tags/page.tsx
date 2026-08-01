@@ -22,18 +22,16 @@ import { CSS } from "@dnd-kit/utilities";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { Modal } from "@/components/ui/Modal";
-
-type TagType = "ability" | "duty" | "operator" | "nature" | "name" | "squadNature" | "map";
-
-interface TagItem {
-  id: string;
-  name: string;
-  category?: "INFANTRY" | "VEHICLE";
-  faction?: string | null;
-  sortOrder: number;
-  usedCount: number;
-  disabled?: boolean;
-}
+import { Loading, Empty } from "@/components/ui/StateView";
+import {
+  fetchTags,
+  createTag,
+  updateTag,
+  deleteTag,
+  toggleTagDisabled,
+  reorderTags,
+} from "@/lib/tag-api";
+import type { AdminTagItem, TagType } from "@/types";
 
 const TAG_META: Record<TagType, { label: string; hasCategory?: boolean; hasFaction?: boolean; isEventTag?: boolean }> = {
   ability: { label: "能力", hasCategory: true },
@@ -45,12 +43,17 @@ const TAG_META: Record<TagType, { label: string; hasCategory?: boolean; hasFacti
   map: { label: "赛事地图", isEventTag: true },
 };
 
+// 弹窗表单状态：null=关闭；{ mode: "create" }=新增；{ mode: "edit", target }=编辑
+type FormState =
+  | { mode: "create" }
+  | { mode: "edit"; target: AdminTagItem }
+  | null;
+
 export default function AdminTagsPage() {
   const [activeType, setActiveType] = useState<TagType>("ability");
-  const [items, setItems] = useState<TagItem[]>([]);
+  const [items, setItems] = useState<AdminTagItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editTarget, setEditTarget] = useState<TagItem | null>(null);
+  const [form, setForm] = useState<FormState>(null);
 
   const [name, setName] = useState("");
   const [category, setCategory] = useState<"INFANTRY" | "VEHICLE">("INFANTRY");
@@ -66,74 +69,55 @@ export default function AdminTagsPage() {
 
   const load = async () => {
     setLoading(true);
-    const res = await fetch(`/api/admin/tags?type=${activeType}`);
-    const data = await res.json();
-    if (data.ok) setItems(data.data);
+    setItems(await fetchTags<AdminTagItem>(activeType));
     setLoading(false);
   };
 
   useEffect(() => { load(); }, [activeType]);
 
-  const handleCreate = async () => {
+  const openCreate = () => {
+    setName("");
+    setFaction("");
+    setCategory("INFANTRY");
+    setForm({ mode: "create" });
+  };
+
+  const openEdit = (item: AdminTagItem) => {
+    setName(item.name);
+    setFaction(item.faction || "");
+    setCategory(item.category || "INFANTRY");
+    setForm({ mode: "edit", target: item });
+  };
+
+  // 新增/编辑共用的提交逻辑
+  const handleSubmit = async () => {
     if (!name.trim()) {
       toast("名称不能为空", "warning");
       return;
     }
-    const res = await fetch("/api/admin/tags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: activeType,
-        op: "create",
-        name: name.trim(),
-        category: TAG_META[activeType].hasCategory ? category : undefined,
-        faction: TAG_META[activeType].hasFaction ? faction.trim() || undefined : undefined,
-      }),
-    });
-    const data = await res.json();
+    if (!form) return;
+    const payload = {
+      name: name.trim(),
+      category: TAG_META[activeType].hasCategory ? category : undefined,
+      faction: TAG_META[activeType].hasFaction ? faction.trim() || undefined : undefined,
+    };
+    const data =
+      form.mode === "create"
+        ? await createTag(activeType, payload)
+        : await updateTag(activeType, { id: form.target.id, ...payload });
     if (data.ok) {
-      toast("创建成功", "success");
-      setCreateOpen(false);
-      setName("");
-      setFaction("");
+      toast(form.mode === "create" ? "创建成功" : "修改成功", "success");
+      setForm(null);
       load();
     } else {
-      toast(data.error || "创建失败", "error");
-    }
-  };
-
-  const handleUpdate = async (item: TagItem, newName: string, newCategory?: string, newFaction?: string) => {
-    const res = await fetch("/api/admin/tags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: activeType,
-        op: "update",
-        id: item.id,
-        name: newName.trim(),
-        category: TAG_META[activeType].hasCategory ? newCategory : undefined,
-        faction: TAG_META[activeType].hasFaction ? newFaction : undefined,
-      }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      toast("修改成功", "success");
-      setEditTarget(null);
-      load();
-    } else {
-      toast(data.error || "修改失败", "error");
+      toast(data.error || (form.mode === "create" ? "创建失败" : "修改失败"), "error");
     }
   };
 
   // 禁用/启用：禁用后所有人不可在新记录中使用此标签，已使用的不受影响
-  const handleToggleDisable = async (item: TagItem) => {
+  const handleToggleDisable = async (item: AdminTagItem) => {
     const next = !item.disabled;
-    const res = await fetch("/api/admin/tags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: activeType, op: "toggleDisable", id: item.id, disabled: next }),
-    });
-    const data = await res.json();
+    const data = await toggleTagDisabled(activeType, item.id, next);
     if (data.ok) {
       toast(next ? "已禁用" : "已启用", "success");
       load();
@@ -143,7 +127,7 @@ export default function AdminTagsPage() {
   };
 
   // 删除：同步删除，仅确认/取消。被使用的标签无法删除，提示改用禁用。
-  const handleDelete = async (item: TagItem) => {
+  const handleDelete = async (item: AdminTagItem) => {
     const yes = await confirm({
       title: "删除标签",
       message: `确定要删除「${item.name}」吗？被使用的标签无法删除，请改用「禁用」。`,
@@ -152,12 +136,7 @@ export default function AdminTagsPage() {
       danger: true,
     });
     if (!yes) return;
-    const res = await fetch("/api/admin/tags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: activeType, op: "delete", id: item.id }),
-    });
-    const data = await res.json();
+    const data = await deleteTag(activeType, item.id);
     if (data.ok) {
       toast("已删除", "success");
       load();
@@ -175,12 +154,7 @@ export default function AdminTagsPage() {
     if (oldIndex < 0 || newIndex < 0) return;
     const next = arrayMove(items, oldIndex, newIndex);
     setItems(next);
-    const res = await fetch("/api/admin/tags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: activeType, op: "reorder", orderedIds: next.map((i) => i.id) }),
-    });
-    const data = await res.json();
+    const data = await reorderTags(activeType, next.map((i) => i.id));
     if (!data.ok) {
       toast(data.error || "排序失败", "error");
       load();
@@ -224,16 +198,18 @@ export default function AdminTagsPage() {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600 }}>{TAG_META[activeType].label}列表（{items.length}）</h2>
-        <button className="win-btn win-btn-primary" onClick={() => { setName(""); setFaction(""); setCategory("INFANTRY"); setCreateOpen(true); }}>
+        <button className="win-btn win-btn-primary" onClick={openCreate}>
           + 新增
         </button>
       </div>
 
       {/* 列表 */}
       {loading ? (
-        <div style={{ textAlign: "center", padding: 40, color: "var(--win-text-tertiary)" }}>加载中...</div>
+        <Loading />
       ) : items.length === 0 ? (
-        <div className="win-card" style={{ padding: 40, textAlign: "center", color: "var(--win-text-tertiary)" }}>暂无标签</div>
+        <div className="win-card" style={{ overflow: "hidden" }}>
+          <Empty text="暂无标签" />
+        </div>
       ) : (
         <div className="win-card" style={{ overflow: "hidden" }}>
           <DndContext
@@ -247,12 +223,7 @@ export default function AdminTagsPage() {
                   key={item.id}
                   item={item}
                   isLast={idx === items.length - 1}
-                  onEdit={() => {
-                    setEditTarget(item);
-                    setName(item.name);
-                    setFaction(item.faction || "");
-                    setCategory(item.category || "INFANTRY");
-                  }}
+                  onEdit={() => openEdit(item)}
                   onToggleDisable={() => handleToggleDisable(item)}
                   onDelete={() => handleDelete(item)}
                 />
@@ -262,54 +233,16 @@ export default function AdminTagsPage() {
         </div>
       )}
 
-      {/* 创建弹窗 */}
+      {/* 新增/编辑共用弹窗 */}
       <Modal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        title={`新增${TAG_META[activeType].label}`}
+        open={!!form}
+        onClose={() => setForm(null)}
+        title={`${form?.mode === "edit" ? "编辑" : "新增"}${TAG_META[activeType].label}`}
         footer={
           <>
-            <button className="win-btn" onClick={() => setCreateOpen(false)}>取消</button>
-            <button className="win-btn win-btn-primary" onClick={handleCreate}>创建</button>
-          </>
-        }
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <label className="win-label">名称</label>
-            <input className="win-input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          </div>
-          {TAG_META[activeType].hasCategory && (
-            <div>
-              <label className="win-label">方向</label>
-              <select className="win-input" value={category} onChange={(e) => setCategory(e.target.value as any)}>
-                <option value="INFANTRY">步兵方向</option>
-                <option value="VEHICLE">载具方向</option>
-              </select>
-            </div>
-          )}
-          {TAG_META[activeType].hasFaction && (
-            <div>
-              <label className="win-label">阵营（可选）</label>
-              <input className="win-input" value={faction} onChange={(e) => setFaction(e.target.value)} placeholder="如：攻方" />
-            </div>
-          )}
-        </div>
-      </Modal>
-
-      {/* 编辑弹窗 */}
-      <Modal
-        open={!!editTarget}
-        onClose={() => setEditTarget(null)}
-        title={`编辑${TAG_META[activeType].label}`}
-        footer={
-          <>
-            <button className="win-btn" onClick={() => setEditTarget(null)}>取消</button>
-            <button
-              className="win-btn win-btn-primary"
-              onClick={() => editTarget && handleUpdate(editTarget, name, category, faction)}
-            >
-              保存
+            <button className="win-btn" onClick={() => setForm(null)}>取消</button>
+            <button className="win-btn win-btn-primary" onClick={handleSubmit}>
+              {form?.mode === "edit" ? "保存" : "创建"}
             </button>
           </>
         }
@@ -322,7 +255,7 @@ export default function AdminTagsPage() {
           {TAG_META[activeType].hasCategory && (
             <div>
               <label className="win-label">方向</label>
-              <select className="win-input" value={category} onChange={(e) => setCategory(e.target.value as any)}>
+              <select className="win-input" value={category} onChange={(e) => setCategory(e.target.value as "INFANTRY" | "VEHICLE")}>
                 <option value="INFANTRY">步兵方向</option>
                 <option value="VEHICLE">载具方向</option>
               </select>
@@ -331,12 +264,12 @@ export default function AdminTagsPage() {
           {TAG_META[activeType].hasFaction && (
             <div>
               <label className="win-label">阵营（可选）</label>
-              <input className="win-input" value={faction} onChange={(e) => setFaction(e.target.value)} />
+              <input className="win-input" value={faction} onChange={(e) => setFaction(e.target.value)} placeholder="如：攻方" />
             </div>
           )}
-          {editTarget && editTarget.usedCount > 0 && (
+          {form?.mode === "edit" && form.target.usedCount > 0 && (
             <div style={{ padding: 12, background: "var(--win-bg-hover)", borderRadius: 8, fontSize: 13, color: "var(--win-text-secondary)" }}>
-              该标签已被使用 {editTarget.usedCount} 次。修改名称后，所有引用处将自动同步显示新名称（按 ID 关联）。
+              该标签已被使用 {form.target.usedCount} 次。修改名称后，所有引用处将自动同步显示新名称（按 ID 关联）。
             </div>
           )}
         </div>
@@ -353,7 +286,7 @@ function SortableTagRow({
   onToggleDisable,
   onDelete,
 }: {
-  item: TagItem;
+  item: AdminTagItem;
   isLast: boolean;
   onEdit: () => void;
   onToggleDisable: () => void;

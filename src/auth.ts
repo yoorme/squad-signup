@@ -1,6 +1,7 @@
 import NextAuth, { type NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
+import { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildUsername } from "@/lib/constants";
 
@@ -39,16 +40,16 @@ export const authConfig: NextAuthConfig = {
           email: null,
           role: user.role,
           nickname: user.nickname,
-        } as any;
+        };
       },
     }),
   ],
   callbacks: {
     async jwt({ token, user, trigger }) {
       if (user) {
-        token.id = (user as any).id;
-        token.role = (user as any).role;
-        token.nickname = (user as any).nickname;
+        token.id = user.id;
+        token.role = user.role;
+        token.nickname = user.nickname;
       }
       // 前端调用 update() 时（如修改昵称/资料后），不信任客户端传入的
       // session 数据，统一从数据库重读，防止伪造 token 中的身份信息，
@@ -67,9 +68,9 @@ export const authConfig: NextAuthConfig = {
     },
     async session({ session, token }) {
       if (session.user) {
-        (session.user as any).id = token.id;
-        (session.user as any).role = token.role;
-        (session.user as any).nickname = token.nickname;
+        session.user.id = token.id as string;
+        session.user.role = token.role as Role;
+        session.user.nickname = token.nickname as string;
         session.user.name = token.name ?? session.user.name;
       }
       return session;

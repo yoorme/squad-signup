@@ -9,7 +9,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!session?.user) {
     redirect("/login");
   }
-  const user = session.user as any;
+  const user = session.user;
   const isAdmin = user.role === Role.ADMIN;
 
   // 计算未读公告数
