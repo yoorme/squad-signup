@@ -84,7 +84,7 @@ export function AssignView({ eventId, onClose }: Props) {
     setEvent((prev) => {
       if (!prev) return prev;
       let member: Member | undefined;
-      const squads = prev.squads.map((s) => {
+      let squads = prev.squads.map((s) => {
         const idx = s.members.findIndex((m) => m.registrationId === regId);
         if (idx >= 0) {
           member = s.members[idx];
