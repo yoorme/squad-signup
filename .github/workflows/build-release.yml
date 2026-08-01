@@ -43,13 +43,26 @@ jobs:
           cp -r prisma dist/prisma
           tar -czf dist.tar.gz -C dist .
 
-      - name: Upload to GitHub Release (latest)
+      - name: Upload to GitHub Release (latest + 版本化归档)
         run: |
-          # 覆盖式更新 latest release：先删旧 release，再创建新的
+          # 覆盖式更新 latest release：服务器 update.sh 固定拉取此产物
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
           gh release create latest dist.tar.gz \
             --title "Latest Build" \
             --notes "Auto-built from commit ${{ github.sha }}" \
             --target main
+
+          # 归档 build-<sha> 标签，更新异常时可回滚；仅保留最近 5 个
+          ARCHIVE_TAG="build-${GITHUB_SHA::7}"
+          gh release create "$ARCHIVE_TAG" dist.tar.gz \
+            --title "Build ${GITHUB_SHA::7}" \
+            --notes "Archived build from commit ${{ github.sha }}" \
+            --target main
+
+          # release list 默认按发布时间倒序，第 6 个起即为待清理的旧归档
+          gh release list --json tagName --jq '.[].tagName' \
+            | grep '^build-' | tail -n +6 | while read -r tag; do
+                [ -n "$tag" ] && gh release delete "$tag" --yes --cleanup-tag || true
+              done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
