@@ -120,6 +120,15 @@ ensure_node() {
     warn "未检测到 Node.js，开始安装..."
   fi
   install_node
+  # 二次校验：安装脚本可能因网络/兼容性失败，或装到系统源自带的旧版 node
+  hash -r 2>/dev/null || true  # 清除 bash 命令哈希，确保重新查找 PATH
+  if ! need_cmd node; then
+    die "Node.js 安装失败，请手动安装 Node.js v${MIN_NODE_MAJOR}+ 后重试"
+  fi
+  local major2; major2=$(node_major)
+  if (( major2 < MIN_NODE_MAJOR )); then
+    die "安装后 Node.js 版本仍为 $(node -v)，不满足 v${MIN_NODE_MAJOR}+ 要求；可能系统源提供了旧版 node，请手动安装 Node.js v${MIN_NODE_MAJOR}+"
+  fi
   ok "Node.js $(node -v) 已安装"
 }
 
@@ -183,6 +192,10 @@ fetch_code() {
     git -C "$INSTALL_DIR" reset --hard "origin/$BRANCH" >/dev/null
     ok "代码已更新到最新"
   else
+    # 目录已存在但非 git 仓库：非空则报错（避免 git clone 失败 + 误覆盖用户文件）
+    if [[ -d "$INSTALL_DIR" ]] && [[ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]]; then
+      die "$INSTALL_DIR 已存在且非空，无法克隆。请先卸载（bash install.sh --uninstall）或清空该目录后重试"
+    fi
     log "克隆仓库到 $INSTALL_DIR ..."
     mkdir -p "$INSTALL_DIR"
     git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"
@@ -325,26 +338,76 @@ EOF
 }
 
 setup_nohup() {
-  # 无 systemd 时的降级方案：nohup + PID 文件 + 可选开机自启
+  # 无 systemd 时的降级方案：nohup + 进程组 + PID 文件 + 可选开机自启
   local node_bin; node_bin=$(node_bin_path)
   local port="${PORT:-$DEFAULT_PORT}"
 
   cat > "$INSTALL_DIR/start.sh" <<EOF
 #!/usr/bin/env bash
+# 启动 squad-signup（nohup 模式）
 cd "$INSTALL_DIR" || exit 1
+
+# 启动前清理可能残留的旧进程（避免端口占用）
+if [ -f .pid ]; then
+  old_pid=\$(cat .pid 2>/dev/null)
+  if [ -n "\$old_pid" ] && kill -0 "\$old_pid" 2>/dev/null; then
+    echo "检测到旧进程 \$old_pid，正在停止..."
+    kill -- -"\$old_pid" 2>/dev/null || kill "\$old_pid" 2>/dev/null || true
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "\$old_pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    kill -9 "\$old_pid" 2>/dev/null || true
+    kill -9 -- -"\$old_pid" 2>/dev/null || true
+  fi
+  rm -f .pid
+fi
+
 export NODE_ENV=production
 export PORT="$port"
 [ -f .env ] && { set -a; . ./.env; set +a; }
 mkdir -p logs
-nohup "$node_bin" node_modules/.bin/next start >> logs/app.log 2>&1 &
+
+# setsid 创建新进程组，便于 stop.sh 杀整组（next start 可能 fork 子进程）
+if command -v setsid >/dev/null 2>&1; then
+  setsid nohup "$node_bin" node_modules/.bin/next start >> logs/app.log 2>&1 &
+else
+  nohup "$node_bin" node_modules/.bin/next start >> logs/app.log 2>&1 &
+fi
 echo \$! > .pid
-echo "已启动 (PID \$(cat .pid))，端口 $port"
+sleep 1
+if kill -0 "\$(cat .pid)" 2>/dev/null; then
+  echo "已启动 (PID \$(cat .pid))，端口 $port"
+  echo "日志：tail -f $INSTALL_DIR/logs/app.log"
+else
+  echo "启动失败，请查看日志：$INSTALL_DIR/logs/app.log"
+  exit 1
+fi
 EOF
   cat > "$INSTALL_DIR/stop.sh" <<EOF
 #!/usr/bin/env bash
+# 停止 squad-signup（nohup 模式）
 cd "$INSTALL_DIR" || exit 1
 if [ -f .pid ]; then
-  kill "\$(cat .pid)" 2>/dev/null && rm -f .pid && echo "已停止"
+  pid=\$(cat .pid 2>/dev/null)
+  rm -f .pid
+  if [ -n "\$pid" ] && kill -0 "\$pid" 2>/dev/null; then
+    # 优先杀整个进程组（setsid 创建的 PGID=PID），兜底杀单个进程
+    kill -- -"\$pid" 2>/dev/null || kill "\$pid" 2>/dev/null || true
+    # 等待进程退出（最多 5 秒）
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "\$pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    # 仍未退出则强杀
+    if kill -0 "\$pid" 2>/dev/null; then
+      kill -9 "\$pid" 2>/dev/null || true
+      kill -9 -- -"\$pid" 2>/dev/null || true
+    fi
+    echo "已停止"
+  else
+    echo "进程未运行"
+  fi
 else
   echo "未运行"
 fi
