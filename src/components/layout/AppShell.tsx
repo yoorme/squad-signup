@@ -197,8 +197,8 @@ export function AppShell({ children, navItems = defaultNavItems, showAdmin }: Ap
         })}
       </nav>
 
-      {/* 队员入口：浮动在内容区左下角（导航栏右侧），不在主导航列表中 */}
-      {!pathname?.startsWith("/members") && (
+      {/* 队员入口：仅在公告页面显示，浮动在内容区左下角（导航栏右侧） */}
+      {pathname === "/announcements" && (
         <Link
           href="/members"
           id="members-fab"
