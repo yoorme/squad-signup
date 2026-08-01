@@ -15,14 +15,14 @@ interface AnnouncementDetail {
   contentMarkdown: string;
   createdAt: string;
   updatedAt: string;
-  author: { username: string; nickname: string };
+  author: { id: string; username: string; nickname: string };
   images: { id: string; path: string }[];
   reads: { confirmedAt: string | null }[];
   comments: {
     id: string;
     content: string;
     createdAt: string;
-    user: { username: string; nickname: string };
+    user: { id: string; username: string; nickname: string };
     isMine?: boolean;
   }[];
 }
@@ -162,8 +162,8 @@ export default function AnnouncementDetailPage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
           <div style={{ flex: 1 }}>
             <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 8 }}>{detail.title}</h1>
-            <div style={{ fontSize: 12, color: "var(--win-text-tertiary)", display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <span>{detail.author.username}</span>
+            <div style={{ fontSize: 12, color: "var(--win-text-tertiary)", display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <Link href={`/members/${detail.author.id}`} style={{ color: "var(--win-text-secondary)", textDecoration: "none" }}>{detail.author.username}</Link>
               <span>发布于 {formatDateTime(detail.createdAt)}</span>
               {detail.updatedAt !== detail.createdAt && <span>更新于 {formatDateTime(detail.updatedAt)}</span>}
             </div>
@@ -257,7 +257,7 @@ export default function AnnouncementDetailPage() {
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--win-text)" }}>{c.user.username}</span>
+                  <Link href={`/members/${c.user.id}`} style={{ fontSize: 13, fontWeight: 600, color: "var(--win-text)", textDecoration: "none" }}>{c.user.username}</Link>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <span style={{ fontSize: 11, color: "var(--win-text-tertiary)" }}>{formatDateTime(c.createdAt)}</span>
                     {(c.isMine || isAdmin) && (

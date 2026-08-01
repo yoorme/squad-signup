@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { formatDateTime } from "@/lib/constants";
 
 interface Ability { id: string; name: string; category: "INFANTRY" | "VEHICLE"; }
@@ -68,7 +69,18 @@ export default function MembersPage() {
             const infantry = m.abilities.filter((a) => a.category === "INFANTRY");
             const vehicle = m.abilities.filter((a) => a.category === "VEHICLE");
             return (
-              <div key={m.id} className="win-card win-reveal" style={{ padding: 20 }}>
+              <Link
+                key={m.id}
+                href={`/members/${m.id}`}
+                className="win-card win-reveal"
+                style={{
+                  padding: 20,
+                  display: "block",
+                  textDecoration: "none",
+                  color: "inherit",
+                  cursor: "pointer",
+                }}
+              >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
@@ -122,7 +134,7 @@ export default function MembersPage() {
                     )}
                   </div>
                 )}
-              </div>
+              </Link>
             );
           })}
         </div>

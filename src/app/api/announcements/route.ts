@@ -16,11 +16,11 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     const announcement = await prisma.announcement.findUnique({
       where: { id },
       include: {
-        author: { select: { username: true, nickname: true } },
+        author: { select: { id: true, username: true, nickname: true } },
         images: { orderBy: { sortOrder: "asc" } },
         reads: { where: { userId: user.id } },
         comments: {
-          include: { user: { select: { username: true, nickname: true } } },
+          include: { user: { select: { id: true, username: true, nickname: true } } },
           orderBy: { createdAt: "asc" },
         },
       },

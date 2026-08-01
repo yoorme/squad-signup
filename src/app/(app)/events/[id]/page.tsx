@@ -379,12 +379,13 @@ function SquadDisplayView({
   );
 }
 
-// 成员 chip
+// 成员 chip - 点击跳转到队员详情页
 function MemberChip({ member, isMe }: { member: Member; isMe?: boolean }) {
   const duty = member.duties.find((d) => d.name !== "无");
   const abilityLabels = member.abilities.map((a) => a.name).slice(0, 3);
   return (
-    <div
+    <Link
+      href={`/members/${member.userId}`}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -395,6 +396,8 @@ function MemberChip({ member, isMe }: { member: Member; isMe?: boolean }) {
         border: `1px solid ${isMe ? "var(--win-accent)" : "var(--win-border)"}`,
         fontSize: 12,
         color: isMe ? "var(--win-accent)" : "var(--win-text)",
+        textDecoration: "none",
+        cursor: "pointer",
       }}
     >
       <span style={{ fontWeight: 500 }}>{member.nickname}</span>
@@ -408,6 +411,6 @@ function MemberChip({ member, isMe }: { member: Member; isMe?: boolean }) {
           {abilityLabels.join("·")}
         </span>
       )}
-    </div>
+    </Link>
   );
 }

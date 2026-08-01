@@ -35,7 +35,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   const comment = await prisma.announcementComment.create({
     data: { announcementId, userId: user.id, content },
-    include: { user: { select: { username: true, nickname: true } } },
+    include: { user: { select: { id: true, username: true, nickname: true } } },
   });
 
   return ok({
