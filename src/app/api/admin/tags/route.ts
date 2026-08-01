@@ -134,7 +134,7 @@ async function reorderTags(type: TagType, orderedIds: string[]) {
   );
 }
 
-async function updateSortOrder(type: TagType, id: string, sortOrder: number) {
+function updateSortOrder(type: TagType, id: string, sortOrder: number) {
   const data = { sortOrder };
   if (type === "ability") return prisma.ability.update({ where: { id }, data });
   if (type === "duty") return prisma.duty.update({ where: { id }, data });
