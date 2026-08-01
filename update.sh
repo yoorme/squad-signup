@@ -1,105 +1,67 @@
 #!/usr/bin/env bash
-# squad-signup 服务器更新脚本（裸机部署）
+# squad-signup 服务器更新脚本（预构建产物模式）
 # 用法：bash update.sh
 #
-# 自动完成：停服务释放内存 → 检查 swap → 拉代码 → 跳过类型检查补丁 →
-#           安装依赖 → 数据库迁移 → 构建（限制内存）→ 启动服务
-#
-# 防崩溃保障：
-#   1. 构建前先停服务（释放 200-500MB 内存给构建用）
-#   2. 自动创建 4G swap（next build 峰值需 3-4G）
-#   3. 跳过类型检查（OOM 主要元凶）
-#   4. 限制 node 内存 2G
-#   5. 构建失败时不启动服务（保持原版本运行，但服务已停需手动启动）
+# 核心思路：不在服务器上构建！直接下载 GitHub Actions 预构建的产物。
+# 服务器只做：停服务 → 下载产物 → 跑迁移 → 启动。
+# 全程内存占用 < 200MB，绝不会 OOM 崩溃。
 set -euo pipefail
 
 INSTALL_DIR="/opt/squad-signup"
-cd "$INSTALL_DIR" || { echo "✗ 无法进入 $INSTALL_DIR"; exit 1; }
+REPO="yoorme/squad-signup"
+DIST_URL="https://github.com/${REPO}/releases/download/latest/dist.tar.gz"
 
-# 确保 swap 足够（避免构建时 OOM 导致服务器崩溃）
-ensure_swap() {
-  local swap_mb mem_mb
-  swap_mb=$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-  if (( swap_mb >= 4096 )); then
-    echo "✓ Swap 已有 ${swap_mb}MB，构建内存充足"
-    return 0
-  fi
-  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-    echo "! Swap 不足（${swap_mb}MB < 4096MB）且非 root，构建可能 OOM"
-    return 0
-  fi
-  mem_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-  if (( mem_mb >= 8192 )); then
-    echo "✓ 物理内存 ${mem_mb}MB 充足，跳过 swap"
-    return 0
-  fi
-  echo "! Swap 不足（${swap_mb}MB）+ 物理内存 ${mem_mb}MB，自动创建 4G swap..."
-  if [[ ! -f /swapfile ]]; then
-    fallocate -l 4G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=4096
-    chmod 600 /swapfile
-    mkswap /swapfile
-  fi
-  swapon /swapfile 2>/dev/null || true
-  grep -q '/swapfile' /etc/fstab 2>/dev/null || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-  echo "✓ Swap 已创建并启用（4G）"
-}
+cd "$INSTALL_DIR" || { echo "✗ 无法进入 $INSTALL_DIR（请先用 install.sh 安装）"; exit 1; }
 
-echo "▶ 1/7 停止服务（释放内存给构建用）..."
+echo "▶ 1/4 停止服务..."
 systemctl stop squad-signup 2>/dev/null || true
 echo "✓ 服务已停止"
 
-echo "▶ 2/7 检查内存与 swap..."
-ensure_swap
+echo "▶ 2/4 下载预构建产物..."
+tmp_tar="/tmp/squad-signup-dist.tar.gz"
+if ! curl -fsSL "$DIST_URL" -o "$tmp_tar"; then
+  echo "✗ 下载失败。GitHub Actions 可能还在构建中"
+  echo "  查看构建状态：https://github.com/${REPO}/actions"
+  echo "  服务已停止，原版本文件仍在，可手动启动恢复：systemctl start squad-signup"
+  exit 1
+fi
+echo "✓ 产物下载完成（$(du -h "$tmp_tar" | cut -f1)）"
 
-echo "▶ 3/7 拉取最新代码..."
-git fetch --quiet origin main
-git reset --hard origin/main
-echo "✓ 代码已更新"
+# 解压（保留 .env 和 .deploy.conf）
+tmp_extract=$(mktemp -d)
+tar -xzf "$tmp_tar" -C "$tmp_extract"
+rm -f "$tmp_tar"
 
-echo "▶ 4/7 应用构建补丁（跳过类型检查，避免 OOM）..."
-# git pull 会还原 next.config.ts，这里重新写入跳过类型检查的配置
-cat > next.config.ts <<'PATCH'
-import type { NextConfig } from "next";
+# 备份 .env
+env_backup=""
+if [[ -f "$INSTALL_DIR/.env" ]]; then
+  env_backup=$(mktemp)
+  cp "$INSTALL_DIR/.env" "$env_backup"
+fi
 
-const nextConfig: NextConfig = {
-  output: "standalone",
-  allowedDevOrigins: ["remote-agent.svc.cluster.local", "*.remote-agent.svc.cluster.local"],
-  poweredByHeader: false,
-  compress: true,
-  typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true },
-  async headers() {
-    return [
-      {
-        source: "/_next/static/:path*",
-        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
-      },
-    ];
-  },
-};
+# 替换 standalone 和 prisma
+rm -rf "$INSTALL_DIR/standalone" "$INSTALL_DIR/prisma"
+mv "$tmp_extract/standalone" "$INSTALL_DIR/standalone"
+mv "$tmp_extract/prisma" "$INSTALL_DIR/prisma"
+rm -rf "$tmp_extract"
 
-export default nextConfig;
-PATCH
-echo "✓ 补丁已应用"
+# 恢复 .env
+if [[ -n "$env_backup" ]]; then
+  cp "$env_backup" "$INSTALL_DIR/.env"
+  rm -f "$env_backup"
+fi
+echo "✓ 产物已更新"
 
-echo "▶ 5/7 安装依赖..."
-npm ci --no-audit --no-fund
-
-echo "▶ 6/7 数据库迁移 + 构建..."
+echo "▶ 3/4 数据库迁移..."
+# 只装 prisma + tsx（轻量，不 build，不会 OOM）
+npm install --no-audit --no-fund --no-save prisma tsx 2>/dev/null || \
+  npm install --no-audit --no-fund prisma tsx
 set -a; . ./.env; set +a
 npx prisma migrate deploy
 npx tsx prisma/seed.ts
+echo "✓ 迁移完成"
 
-# 构建：限制内存，失败则不启动服务（保持原版本，但服务已停需手动启动）
-if ! NODE_OPTIONS="--max-old-space-size=2048" npx next build; then
-  echo "✗ 构建失败！原版本文件已被 git 覆盖，但数据库未受影响"
-  echo "  请查看上方错误日志，修复后重新运行 bash update.sh"
-  echo "  如需紧急恢复服务，可手动启动旧版：systemctl start squad-signup"
-  exit 1
-fi
-echo "✓ 构建完成"
-
-echo "▶ 7/7 启动服务..."
+echo "▶ 4/4 启动服务..."
 systemctl start squad-signup
 sleep 2
 if systemctl is-active --quiet squad-signup; then

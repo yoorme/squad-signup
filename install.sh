@@ -1,30 +1,34 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC1090,SC1091
 # ============================================================================
-# squad-signup 一键安装 / 更新脚本
+# squad-signup 一键安装 / 更新脚本（预构建产物模式）
 # 三角洲行动战队赛事报名系统（Next.js + Prisma + PostgreSQL）
+#
+# 核心思路：不在服务器上构建！构建在 GitHub Actions 上完成。
+# 服务器只负责下载预构建产物 + 配置 .env + 跑迁移 + 启动。
+# 彻底告别小内存服务器构建 OOM 崩溃问题。
 #
 # 用法：
 #   安装或更新（自动识别）：
 #     curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/install.sh | bash
 #
 #   指定参数：
-#     curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/install.sh | bash -s -- --update
+#     curl -fsSL ... | bash -s -- --update
 #     curl -fsSL ... | bash -s -- --uninstall
 #     curl -fsSL ... | bash -s -- --status
 #
-#   非交互（自动化部署，全部用环境变量）：
+#   非交互（自动化部署）：
 #     DATABASE_URL=... DIRECT_URL=... NEXTAUTH_URL=https://... \
 #       curl -fsSL ... | NONINTERACTIVE=1 bash
-#
-# 已安装则进入更新流程；未安装则进入安装流程。
 # ============================================================================
 
 set -euo pipefail
 
 # ---------------- 全局配置 ----------------
-REPO_URL="https://github.com/yoorme/squad-signup.git"
+REPO="yoorme/squad-signup"
 BRANCH="${BRANCH:-main}"
+# 预构建产物下载地址（GitHub Release，由 GitHub Actions 自动构建上传）
+DIST_URL="https://github.com/${REPO}/releases/download/latest/dist.tar.gz"
 DEFAULT_PORT="${PORT:-3000}"
 MIN_NODE_MAJOR=20
 NVM_VERSION="v0.39.7"
@@ -55,13 +59,10 @@ err()  { printf "%s✗%s %s\n"   "$C_RED"     "$C_RESET" "$*" >&2; }
 die()  { err "$*"; exit 1; }
 
 # ---------------- 交互输入 ----------------
-# curl|bash 时 stdin 是管道，不能直接 read；改从 /dev/tty 读取。
-# 若 /dev/tty 不存在或设置 NONINTERACTIVE=1，则使用环境变量/默认值。
 is_interactive() {
   [[ "${NONINTERACTIVE:-0}" != "1" ]] && [[ -e /dev/tty ]]
 }
 
-# ask <var> <message> <default>
 ask() {
   local var="$1" msg="$2" def="${3:-}" val=""
   if is_interactive; then
@@ -72,7 +73,6 @@ ask() {
   printf -v "$var" '%s' "$val"
 }
 
-# confirm <message> <default(y|n)>
 confirm() {
   local msg="$1" def="${2:-y}" yn=""
   local hint; [[ "$def" == y ]] && hint="Y/n" || hint="y/N"
@@ -89,7 +89,6 @@ confirm() {
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 has_systemd() {
-  # 真正由 systemd 作为 init 启动时才用 systemd 服务，否则降级为 nohup
   [[ ${EUID:-$(id -u)} -eq 0 ]] && [[ -d /run/systemd/system ]] && need_cmd systemctl
 }
 
@@ -103,7 +102,7 @@ server_ip() {
   printf '%s' "$ip"
 }
 
-# ---------------- Node.js 安装 ----------------
+# ---------------- Node.js 安装（仅运行时，不需要构建） ----------------
 node_major() {
   node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0
 }
@@ -120,14 +119,13 @@ ensure_node() {
     warn "未检测到 Node.js，开始安装..."
   fi
   install_node
-  # 二次校验：安装脚本可能因网络/兼容性失败，或装到系统源自带的旧版 node
-  hash -r 2>/dev/null || true  # 清除 bash 命令哈希，确保重新查找 PATH
+  hash -r 2>/dev/null || true
   if ! need_cmd node; then
     die "Node.js 安装失败，请手动安装 Node.js v${MIN_NODE_MAJOR}+ 后重试"
   fi
   local major2; major2=$(node_major)
   if (( major2 < MIN_NODE_MAJOR )); then
-    die "安装后 Node.js 版本仍为 $(node -v)，不满足 v${MIN_NODE_MAJOR}+ 要求；可能系统源提供了旧版 node，请手动安装 Node.js v${MIN_NODE_MAJOR}+"
+    die "安装后 Node.js 版本仍为 $(node -v)，不满足 v${MIN_NODE_MAJOR}+ 要求"
   fi
   ok "Node.js $(node -v) 已安装"
 }
@@ -149,7 +147,6 @@ install_node() {
       return 0
     fi
   fi
-  # 非 root 或无包管理器：nvm 装到用户目录
   install_node_nvm
 }
 
@@ -184,82 +181,51 @@ ensure_base_tools() {
   die "缺少基础命令：${missing[*]}，请先手动安装。"
 }
 
-# ---------------- 内存保护（避免构建时 OOM 崩溃） ----------------
-# 小内存服务器（2G）构建 Next.js 时极易 OOM，自动创建 swap 兜底
-# next build 峰值需 3-4G，物理内存 2G + swap 4G = 6G 才保险
-ensure_swap() {
-  local swap_mb mem_mb
-  swap_mb=$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-  if (( swap_mb >= 4096 )); then
-    ok "Swap 已有 ${swap_mb}MB，构建内存充足"
-    return 0
-  fi
-  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-    warn "Swap 不足（${swap_mb}MB < 4096MB）且非 root 无法创建，构建可能 OOM 崩溃"
-    return 0
-  fi
-  mem_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
-  if (( mem_mb >= 8192 )); then
-    ok "物理内存 ${mem_mb}MB 充足，跳过 swap"
-    return 0
-  fi
-  warn "Swap 不足（${swap_mb}MB）+ 物理内存 ${mem_mb}MB，构建易 OOM，自动创建 4G swap..."
-  local swapfile="/swapfile"
-  if [[ ! -f "$swapfile" ]]; then
-    fallocate -l 4G "$swapfile" 2>/dev/null || dd if=/dev/zero of="$swapfile" bs=1M count=4096
-    chmod 600 "$swapfile"
-    mkswap "$swapfile"
-  fi
-  swapon "$swapfile" 2>/dev/null || true
-  grep -q "$swapfile" /etc/fstab 2>/dev/null || echo "$swapfile none swap sw 0 0" >> /etc/fstab
-  ok "Swap 已创建并启用（4G），构建内存已保障"
-}
+# ---------------- 下载预构建产物 ----------------
+# 从 GitHub Release 下载 dist.tar.gz 并解压
+# dist.tar.gz 内含 standalone/（运行时）+ prisma/（迁移用）
+fetch_dist() {
+  log "下载预构建产物（GitHub Release）..."
+  local tmp_tar="/tmp/squad-signup-dist.tar.gz"
 
-# 构建前停止正在运行的服务，释放内存给构建用（next 进程常驻占 200-500MB）
-stop_service_for_build() {
-  if has_systemd; then
-    systemctl stop squad-signup 2>/dev/null || true
-    ok "已停止服务，释放内存给构建"
-  elif [[ -f "$INSTALL_DIR/stop.sh" ]]; then
-    bash "$INSTALL_DIR/stop.sh" 2>/dev/null || true
-    ok "已停止服务，释放内存给构建"
+  if ! curl -fsSL "$DIST_URL" -o "$tmp_tar"; then
+    die "下载产物失败。GitHub Actions 可能还在构建中，请稍后重试（查看：https://github.com/${REPO}/actions）"
   fi
-}
+  ok "产物下载完成（$(du -h "$tmp_tar" | cut -f1)）"
 
-# 打补丁：next.config 跳过类型检查和 lint（类型检查是 OOM 主要元凶）
-patch_next_config() {
-  local cfg="$INSTALL_DIR/next.config.ts"
-  [[ -f "$cfg" ]] || return 0
-  # 已含 ignoreBuildErrors 则跳过（幂等）
-  grep -q "ignoreBuildErrors" "$cfg" 2>/dev/null && return 0
-  log "应用构建补丁（跳过类型检查，避免 OOM）..."
-  # 在 poweredByHeader 行后插入 typescript/eslint 跳过配置
-  sed -i '/poweredByHeader: false,/a\  typescript: { ignoreBuildErrors: true },\n  eslint: { ignoreDuringBuilds: true },' "$cfg"
-  ok "构建补丁已应用"
-}
+  # 解压到临时目录，再移动到目标位置（保留已有的 .env）
+  local tmp_extract; tmp_extract=$(mktemp -d)
+  tar -xzf "$tmp_tar" -C "$tmp_extract"
+  rm -f "$tmp_tar"
 
-# ---------------- 克隆 / 更新代码 ----------------
-fetch_code() {
-  if [[ -d "$INSTALL_DIR/.git" ]]; then
-    log "更新代码（git pull）..."
-    git -C "$INSTALL_DIR" fetch --quiet origin "$BRANCH"
-    git -C "$INSTALL_DIR" reset --hard "origin/$BRANCH" >/dev/null
-    ok "代码已更新到最新"
-  else
-    # 目录已存在但非 git 仓库：非空则报错（避免 git clone 失败 + 误覆盖用户文件）
-    if [[ -d "$INSTALL_DIR" ]] && [[ -n "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]]; then
-      die "$INSTALL_DIR 已存在且非空，无法克隆。请先卸载（bash install.sh --uninstall）或清空该目录后重试"
-    fi
-    log "克隆仓库到 $INSTALL_DIR ..."
-    mkdir -p "$INSTALL_DIR"
-    git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"
-    ok "代码克隆完成"
+  # 确保 INSTALL_DIR 存在
+  mkdir -p "$INSTALL_DIR"
+
+  # 备份 .env（如果存在）
+  local env_backup=""
+  if [[ -f "$INSTALL_DIR/.env" ]]; then
+    env_backup=$(mktemp)
+    cp "$INSTALL_DIR/.env" "$env_backup"
   fi
+
+  # 清除旧的 standalone/prisma（保留 .env/.deploy.conf）
+  rm -rf "$INSTALL_DIR/standalone" "$INSTALL_DIR/prisma"
+
+  # 移动新产物
+  mv "$tmp_extract/standalone" "$INSTALL_DIR/standalone"
+  mv "$tmp_extract/prisma" "$INSTALL_DIR/prisma"
+  rm -rf "$tmp_extract"
+
+  # 恢复 .env
+  if [[ -n "$env_backup" ]]; then
+    cp "$env_backup" "$INSTALL_DIR/.env"
+    rm -f "$env_backup"
+  fi
+
+  ok "产物已解压到 $INSTALL_DIR"
 }
 
 # ---------------- 生成 .env ----------------
-# 将值转义为 .env 安全的单引号格式：内部 ' 转义为 '\''
-# 单引号确保 source 时 $ 等元字符不被展开（密码含 $ 很常见）
 env_escape() {
   local s="$1"
   s="${s//\'/\'\\\'\'}"
@@ -268,14 +234,11 @@ env_escape() {
 
 configure_env() {
   local env_file="$INSTALL_DIR/.env"
-  # 检查 .env 是否有效：存在且 DATABASE_URL 非空（空值会导致 prisma migrate 报晦涩错误）
   if [[ -f "$env_file" ]]; then
-    # 注意：grep 无匹配返回 1，pipefail 下会触发 set -e 退出，用 || true 兜底
     local existing_db
     existing_db=$(grep '^DATABASE_URL=' "$env_file" 2>/dev/null | sed -E "s/^DATABASE_URL=//; s/^['\"]//; s/['\"]$//" || true)
     if [[ -n "$existing_db" ]]; then
       ok ".env 已存在，保留配置"
-      # 加载到当前环境，供后续构建/启动使用
       set -a; . "$env_file"; set +a
       return 0
     else
@@ -300,7 +263,6 @@ configure_env() {
 
 ${C_BOLD}需要 PostgreSQL 数据库连接串${C_RESET}
 格式：postgresql://用户:密码@主机:5432/库名?schema=public
-例如本地：postgresql://postgres:postgres@localhost:5432/squad_signup?schema=public
 
 EOF
   fi
@@ -320,7 +282,6 @@ EOF
   fi
   ask site_url "站点 URL（NEXTAUTH_URL）" "$site_url"
 
-  # 用单引号写入：source 时 $ 等元字符不被展开，密码含特殊字符也安全
   {
     echo "# 由 install.sh 生成 $(date '+%Y-%m-%d %H:%M:%S')"
     echo "DATABASE_URL=$(env_escape "$db_url")"
@@ -333,16 +294,12 @@ EOF
   } > "$env_file"
   chmod 600 "$env_file"
   ok ".env 已生成"
-  # 加载到当前环境
   set -a; . "$env_file"; set +a
-  # 持久化部署参数供更新时复用
   save_deploy_conf
 }
 
-# 保存部署参数（端口/分支），更新时复用
 save_deploy_conf() {
   local conf="$INSTALL_DIR/.deploy.conf"
-  # 用单引号转义写入（与 .env 一致），防止值含 $/" 等字符时 source 报错
   {
     echo "PORT=$(env_escape "${PORT:-$DEFAULT_PORT}")"
     echo "BRANCH=$(env_escape "$BRANCH")"
@@ -363,33 +320,25 @@ load_deploy_conf() {
   fi
 }
 
-# ---------------- 构建 ----------------
-# 分步构建：不使用 npm run build（它会跑类型检查导致 OOM）
-# 1. 停止服务释放内存 2. 确保 swap 3. 打补丁跳过类型检查
-# 4. 分步执行迁移+构建 5. 限制 node 内存 6. 失败不启动
-build_app() {
+# ---------------- 数据库迁移 ----------------
+# 只安装 prisma + tsx（轻量，不 build，不会 OOM）
+run_migrate() {
   cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
-  stop_service_for_build
-  ensure_swap
-  patch_next_config
-  log "安装依赖（npm install）..."
-  npm install --no-audit --no-fund
+  log "安装 prisma + tsx（仅迁移用，不构建）..."
+  npm install --no-audit --no-fund --no-save prisma tsx 2>/dev/null || \
+    npm install --no-audit --no-fund prisma tsx
+
   log "执行数据库迁移 + seed..."
+  set -a; . "$INSTALL_DIR/.env"; set +a
   npx prisma migrate deploy
   npx tsx prisma/seed.ts
-  log "构建应用（限制内存 2G，跳过类型检查）..."
-  if ! NODE_OPTIONS="--max-old-space-size=2048" npx next build; then
-    die "构建失败，请检查上方错误日志。服务未启动，原版本不受影响"
-  fi
-  ok "构建完成"
+  ok "迁移完成"
 }
 
 # ---------------- 服务管理 ----------------
 node_bin_path() { command -v node || die "找不到 node"; }
 run_user() { printf '%s' "${SUDO_USER:-$(whoami)}"; }
 
-# sudo 安装时文件属主为 root，但 systemd 服务以 SUDO_USER 运行
-# chown 安装目录确保服务用户有读写权限（next start 可能写缓存/上传文件）
 chown_install_dir() {
   if [[ ${EUID:-$(id -u)} -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]]; then
     local user="$SUDO_USER"
@@ -404,8 +353,6 @@ setup_systemd() {
   local port="${PORT:-$DEFAULT_PORT}"
   local user; user=$(run_user)
   local env_file="$INSTALL_DIR/.env"
-
-  # WorkingDirectory 必须是绝对路径（systemd 要求）
   local work_dir
   if [[ "$INSTALL_DIR" = /* ]]; then
     work_dir="$INSTALL_DIR"
@@ -424,8 +371,9 @@ Type=simple
 WorkingDirectory=${work_dir}
 EnvironmentFile=${env_file}
 Environment=NODE_ENV=production
+Environment=HOSTNAME=0.0.0.0
 Environment=PORT=${port}
-ExecStart=${node_bin} node_modules/.bin/next start
+ExecStart=${node_bin} ${work_dir}/standalone/server.js
 Restart=on-failure
 RestartSec=5
 User=${user}
@@ -439,47 +387,34 @@ EOF
 }
 
 setup_nohup() {
-  # 无 systemd 时的降级方案：nohup + 进程组 + PID 文件 + 可选开机自启
   local node_bin; node_bin=$(node_bin_path)
   local port="${PORT:-$DEFAULT_PORT}"
 
   cat > "$INSTALL_DIR/start.sh" <<EOF
 #!/usr/bin/env bash
-# 启动 squad-signup（nohup 模式）
 cd "$INSTALL_DIR" || exit 1
-
-# 启动前清理可能残留的旧进程（避免端口占用）
 if [ -f .pid ]; then
   old_pid=\$(cat .pid 2>/dev/null)
   if [ -n "\$old_pid" ] && kill -0 "\$old_pid" 2>/dev/null; then
-    echo "检测到旧进程 \$old_pid，正在停止..."
     kill -- -"\$old_pid" 2>/dev/null || kill "\$old_pid" 2>/dev/null || true
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-      kill -0 "\$old_pid" 2>/dev/null || break
-      sleep 0.5
-    done
+    sleep 1
     kill -9 "\$old_pid" 2>/dev/null || true
-    kill -9 -- -"\$old_pid" 2>/dev/null || true
   fi
   rm -f .pid
 fi
-
 export NODE_ENV=production
+export HOSTNAME=0.0.0.0
 export PORT="$port"
 [ -f .env ] && { set -a; . ./.env; set +a; }
-mkdir -p logs
-
-# setsid 创建新进程组，便于 stop.sh 杀整组（next start 可能 fork 子进程）
 if command -v setsid >/dev/null 2>&1; then
-  setsid nohup "$node_bin" node_modules/.bin/next start >> logs/app.log 2>&1 &
+  setsid nohup "$node_bin" standalone/server.js >> logs/app.log 2>&1 &
 else
-  nohup "$node_bin" node_modules/.bin/next start >> logs/app.log 2>&1 &
+  nohup "$node_bin" standalone/server.js >> logs/app.log 2>&1 &
 fi
 echo \$! > .pid
 sleep 1
 if kill -0 "\$(cat .pid)" 2>/dev/null; then
   echo "已启动 (PID \$(cat .pid))，端口 $port"
-  echo "日志：tail -f $INSTALL_DIR/logs/app.log"
 else
   echo "启动失败，请查看日志：$INSTALL_DIR/logs/app.log"
   exit 1
@@ -487,20 +422,16 @@ fi
 EOF
   cat > "$INSTALL_DIR/stop.sh" <<EOF
 #!/usr/bin/env bash
-# 停止 squad-signup（nohup 模式）
 cd "$INSTALL_DIR" || exit 1
 if [ -f .pid ]; then
   pid=\$(cat .pid 2>/dev/null)
   rm -f .pid
   if [ -n "\$pid" ] && kill -0 "\$pid" 2>/dev/null; then
-    # 优先杀整个进程组（setsid 创建的 PGID=PID），兜底杀单个进程
     kill -- -"\$pid" 2>/dev/null || kill "\$pid" 2>/dev/null || true
-    # 等待进程退出（最多 5 秒）
     for i in 1 2 3 4 5 6 7 8 9 10; do
       kill -0 "\$pid" 2>/dev/null || break
       sleep 0.5
     done
-    # 仍未退出则强杀
     if kill -0 "\$pid" 2>/dev/null; then
       kill -9 "\$pid" 2>/dev/null || true
       kill -9 -- -"\$pid" 2>/dev/null || true
@@ -515,7 +446,7 @@ fi
 EOF
   chmod +x "$INSTALL_DIR/start.sh" "$INSTALL_DIR/stop.sh"
   ok "已生成 start.sh / stop.sh（端口 ${port}）"
-  warn "当前环境无 systemd，请用 ./start.sh 启动；开机自启可加到 crontab：@reboot ${INSTALL_DIR}/start.sh"
+  warn "当前环境无 systemd，请用 ./start.sh 启动"
 }
 
 start_service() {
@@ -529,18 +460,17 @@ start_service() {
       warn "服务可能未正常启动，查看日志：journalctl -u squad-signup -n 50"
     fi
   fi
-  # nohup 模式由用户手动执行 start.sh，不自动启动（避免构建脚本内常驻）
 }
 
 # ---------------- 安装 / 更新主流程 ----------------
 do_install() {
-  log "${C_BOLD}安装 squad-signup${C_RESET}"
+  log "${C_BOLD}安装 squad-signup（预构建产物模式）${C_RESET}"
   ensure_base_tools
   ensure_node
-  fetch_code
+  fetch_dist
   load_deploy_conf
   configure_env
-  build_app
+  run_migrate
   chown_install_dir
   if has_systemd; then setup_systemd; else setup_nohup; fi
   start_service
@@ -548,17 +478,23 @@ do_install() {
 }
 
 do_update() {
-  log "${C_BOLD}更新 squad-signup${C_RESET}"
-  [[ -d "$INSTALL_DIR/.git" ]] || die "$INSTALL_DIR 不是已安装目录，请用 --install 安装"
+  log "${C_BOLD}更新 squad-signup（预构建产物模式）${C_RESET}"
+  [[ -d "$INSTALL_DIR" ]] || die "$INSTALL_DIR 不存在，请用 --install 安装"
   ensure_base_tools
   ensure_node
   load_deploy_conf
-  fetch_code
-  configure_env   # 已有 .env 时仅加载，不重新询问
-  build_app
+  # 先停服务（释放端口）
+  if has_systemd; then
+    systemctl stop squad-signup 2>/dev/null || true
+  elif [[ -f "$INSTALL_DIR/stop.sh" ]]; then
+    bash "$INSTALL_DIR/stop.sh" 2>/dev/null || true
+  fi
+  fetch_dist
+  configure_env   # 已有 .env 时仅加载
+  run_migrate
   chown_install_dir
   if has_systemd; then
-    setup_systemd   # 重建 unit 以更新 node 路径/端口
+    setup_systemd
     start_service
   else
     setup_nohup
@@ -569,13 +505,11 @@ do_update() {
 
 do_uninstall() {
   log "${C_BOLD}卸载 squad-signup${C_RESET}"
-  # 安全校验：防止 INSTALL_DIR 异常（如 /、/opt、空串）导致 rm -rf 灾难
   safe_rm_install_dir() {
     [[ -n "$INSTALL_DIR" ]] || { warn "INSTALL_DIR 为空，跳过删除"; return 0; }
     [[ "$INSTALL_DIR" != "/" ]] || { warn "INSTALL_DIR 为 /，拒绝删除"; return 0; }
-    # 必须含 squad-signup 标识，或目录内有 package.json/.git 特征文件
-    if [[ "$INSTALL_DIR" != *squad-signup* ]] && [[ ! -f "$INSTALL_DIR/package.json" ]] && [[ ! -d "$INSTALL_DIR/.git" ]]; then
-      warn "$INSTALL_DIR 不像安装目录（无 package.json/.git 且路径不含 squad-signup），跳过删除"
+    if [[ "$INSTALL_DIR" != *squad-signup* ]] && [[ ! -f "$INSTALL_DIR/.env" ]] && [[ ! -d "$INSTALL_DIR/standalone" ]]; then
+      warn "$INSTALL_DIR 不像安装目录，跳过删除"
       return 0
     fi
     rm -rf "$INSTALL_DIR"
@@ -586,7 +520,6 @@ do_uninstall() {
     rm -f /etc/systemd/system/squad-signup.service
     systemctl daemon-reload 2>/dev/null || true
   else
-    # 优先用 stop.sh（新版有进程组清理）；兜底直接读 .pid 杀进程（兼容旧版安装）
     if [[ -f "$INSTALL_DIR/stop.sh" ]]; then
       bash "$INSTALL_DIR/stop.sh" 2>/dev/null || true
     fi
@@ -611,7 +544,6 @@ do_uninstall() {
     safe_rm_install_dir
   fi
   [[ -n "$SYSTEM_CONF" ]] && rm -f "$SYSTEM_CONF"
-  # 清理可能存在的 crontab @reboot 条目（setup_nohup 建议用户添加过）
   if command -v crontab >/dev/null 2>&1; then
     local cur_crontab
     cur_crontab=$(crontab -l 2>/dev/null || true)
@@ -625,7 +557,7 @@ do_uninstall() {
 
 do_status() {
   log "${C_BOLD}squad-signup 状态${C_RESET}"
-  echo "安装目录：$INSTALL_DIR $([[ -d "$INSTALL_DIR/.git" ]] && echo '[已安装]' || echo '[未安装]')"
+  echo "安装目录：$INSTALL_DIR $([[ -d "$INSTALL_DIR/standalone" ]] && echo '[已安装]' || echo '[未安装]')"
   echo "Node.js ：$(need_cmd node && node -v || echo '未安装')"
   if has_systemd; then
     echo "systemd ：$(systemctl is-active squad-signup 2>/dev/null || echo '未运行')"
@@ -637,7 +569,6 @@ do_status() {
     fi
   fi
   if [[ -f "$INSTALL_DIR/.env" ]]; then
-    # 去掉值首尾的单/双引号（.env 用单引号转义写入）
     echo "站点 URL：$(grep '^NEXTAUTH_URL=' "$INSTALL_DIR/.env" | sed -E 's/^NEXTAUTH_URL=//; s/^['\''\"]//; s/['\''\"]$//')"
     echo "数据库 ：$(grep '^DATABASE_URL=' "$INSTALL_DIR/.env" | sed -E 's/^DATABASE_URL=//; s/^['\''\"]//; s/['\''\"]$//; s|://[^@]+@|://***@|')"
   fi
@@ -671,7 +602,7 @@ EOF
   fi
   cat >&2 <<EOF
 
-  更新：curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/install.sh | bash
+  更新：curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | bash
 EOF
 }
 
@@ -706,7 +637,7 @@ main() {
   [[ "$action" == "uninstall" ]] && { do_uninstall; exit 0; }
 
   if [[ "$action" == "auto" ]]; then
-    [[ -d "$INSTALL_DIR/.git" ]] && action="update" || action="install"
+    [[ -d "$INSTALL_DIR/standalone" ]] && action="update" || action="install"
   fi
 
   case "$action" in
