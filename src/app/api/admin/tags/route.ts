@@ -71,12 +71,14 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
 // 增删改标签
 interface TagMutation {
   type: TagType;
-  op: "create" | "update" | "delete" | "toggleDisable";
+  op: "create" | "update" | "delete" | "toggleDisable" | "reorder";
   id?: string;
   name?: string;
   category?: "INFANTRY" | "VEHICLE";
   faction?: string;
   disabled?: boolean;
+  // reorder：按顺序的 id 数组，服务端按数组下标重写 sortOrder
+  orderedIds?: string[];
 }
 
 export const POST = withErrorHandler(async (req: NextRequest) => {
@@ -116,8 +118,33 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     return ok({ success: true });
   }
 
+  if (op === "reorder") {
+    if (!body.orderedIds || body.orderedIds.length === 0) return fail("缺少 orderedIds");
+    await reorderTags(type, body.orderedIds);
+    return ok({ success: true });
+  }
+
   return fail("无效操作");
 });
+
+// 批量重写 sortOrder：按 orderedIds 下标作为新顺序
+async function reorderTags(type: TagType, orderedIds: string[]) {
+  await prisma.$transaction(
+    orderedIds.map((id, idx) => updateSortOrder(type, id, idx))
+  );
+}
+
+async function updateSortOrder(type: TagType, id: string, sortOrder: number) {
+  const data = { sortOrder };
+  if (type === "ability") return prisma.ability.update({ where: { id }, data });
+  if (type === "duty") return prisma.duty.update({ where: { id }, data });
+  if (type === "operator") return prisma.operator.update({ where: { id }, data });
+  if (type === "nature") return prisma.eventNature.update({ where: { id }, data });
+  if (type === "name") return prisma.eventName.update({ where: { id }, data });
+  if (type === "squadNature") return prisma.squadNature.update({ where: { id }, data });
+  if (type === "map") return prisma.eventMap.update({ where: { id }, data });
+  throw new Error("无效类型");
+}
 
 async function getNextSortOrder(type: TagType): Promise<number> {
   let max: number = 0;

@@ -26,7 +26,7 @@ export default function NewEventPage() {
   const [natureId, setNatureId] = useState("");
   const [nameId, setNameId] = useState("");
   const [mapId, setMapId] = useState("");
-  const [requiredCount, setRequiredCount] = useState("16");
+  const [requiredCount, setRequiredCount] = useState("20");
   const [format, setFormat] = useState<"BO3" | "BO5" | "R2" | null>(null);
   const [squadNatures, setSquadNatures] = useState<string[]>([]);
 
@@ -177,7 +177,7 @@ export default function NewEventPage() {
               className={`win-chip ${mapId === "" ? "win-chip-accent" : ""}`}
               style={{ cursor: "pointer", color: mapId === "" ? "var(--win-accent)" : "var(--win-text-tertiary)" }}
             >
-              未选择
+              未知
             </button>
             {tags.maps.map((m) => (
               <button
@@ -215,6 +215,14 @@ export default function NewEventPage() {
         <div>
           <label className="win-label">赛制（可选）</label>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => setFormat(null)}
+              className={`win-chip ${format === null ? "win-chip-accent" : ""}`}
+              style={{ cursor: "pointer", color: format === null ? "var(--win-accent)" : "var(--win-text-tertiary)" }}
+            >
+              未知
+            </button>
             {(["BO3", "BO5", "R2"] as const).map((f) => (
               <button
                 key={f}
@@ -226,14 +234,6 @@ export default function NewEventPage() {
                 {f}
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => setFormat(null)}
-              className={`win-chip ${format === null ? "win-chip-accent" : ""}`}
-              style={{ cursor: "pointer", color: format === null ? "var(--win-accent)" : "var(--win-text-tertiary)" }}
-            >
-              未知
-            </button>
           </div>
           <p style={{ fontSize: 12, color: "var(--win-text-tertiary)", marginTop: 6 }}>
             选择「未知」则不展示赛制标签

@@ -136,7 +136,9 @@ export default function AdminUsersPage() {
               {users.map((u) => (
                 <tr key={u.id} style={{ borderBottom: "1px solid var(--win-border)" }}>
                   <td style={{ padding: "10px 12px" }}>
-                    <div style={{ fontWeight: 500 }}>{u.username}</div>
+                    <Link href={`/members/${u.id}`} style={{ fontWeight: 500, color: "var(--win-text)", textDecoration: "none" }}>
+                      {u.username}
+                    </Link>
                   </td>
                   <td style={{ padding: "10px 12px" }}>
                     <span

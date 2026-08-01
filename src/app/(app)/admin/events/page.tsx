@@ -245,12 +245,20 @@ function EventEditCard({
             <TagEditor type="name" selectedId={nameId} onSelect={setNameId} />
           </div>
           <div>
-            <label className="win-label">赛事地图（可选，点击「未选择」清空）</label>
+            <label className="win-label">赛事地图（可选，点击「未知」清空）</label>
             <TagEditor type="map" selectedId={mapId} onSelect={setMapId} />
           </div>
           <div>
             <label className="win-label">赛制</label>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => setFormat(null)}
+                className={`win-chip ${format === null ? "win-chip-accent" : ""}`}
+                style={{ cursor: "pointer", fontSize: 12, color: format === null ? "var(--win-accent)" : "var(--win-text-tertiary)" }}
+              >
+                未知
+              </button>
               {(["BO3", "BO5", "R2"] as const).map((f) => (
                 <button
                   key={f}
@@ -262,14 +270,6 @@ function EventEditCard({
                   {f}
                 </button>
               ))}
-              <button
-                type="button"
-                onClick={() => setFormat(null)}
-                className={`win-chip ${format === null ? "win-chip-accent" : ""}`}
-                style={{ cursor: "pointer", fontSize: 12, color: format === null ? "var(--win-accent)" : "var(--win-text-tertiary)" }}
-              >
-                未知
-              </button>
             </div>
           </div>
           <div>

@@ -181,7 +181,7 @@ export function TagEditor({ type, selectedId, onSelect }: Props) {
 
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-      {/* 地图类型允许"未选择"（清空地图）：用空字符串表示未选择状态 */}
+      {/* 地图类型允许"未知"（清空地图）：用空字符串表示未知状态 */}
       {type === "map" && (
         <span
           className={`win-chip ${selectedId === "" ? "win-chip-accent" : ""}`}
@@ -194,7 +194,7 @@ export function TagEditor({ type, selectedId, onSelect }: Props) {
           onClick={() => onSelect("")}
           title="不指定地图"
         >
-          未选择
+          未知
         </span>
       )}
 

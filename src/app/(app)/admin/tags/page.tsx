@@ -2,6 +2,23 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { Modal } from "@/components/ui/Modal";
@@ -41,6 +58,11 @@ export default function AdminTagsPage() {
 
   const toast = useToast();
   const confirm = useConfirm();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   const load = async () => {
     setLoading(true);
@@ -144,6 +166,27 @@ export default function AdminTagsPage() {
     }
   };
 
+  // 拖拽结束：本地立即更新顺序，异步持久化到服务端
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = items.findIndex((i) => i.id === active.id);
+    const newIndex = items.findIndex((i) => i.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = arrayMove(items, oldIndex, newIndex);
+    setItems(next);
+    const res = await fetch("/api/admin/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: activeType, op: "reorder", orderedIds: next.map((i) => i.id) }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      toast(data.error || "排序失败", "error");
+      load();
+    }
+  };
+
   return (
     <div style={{ maxWidth: 880, margin: "0 auto" }}>
       <Link href="/admin" style={{ fontSize: 13, color: "var(--win-text-secondary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 12 }}>
@@ -153,7 +196,7 @@ export default function AdminTagsPage() {
 
       <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 4 }}>标签维护</h1>
       <p style={{ fontSize: 13, color: "var(--win-text-secondary)", marginBottom: 24 }}>
-        管理能力、职责、干员、赛事性质、赛事名称、分队性质、赛事地图等标签 · 禁用后不可新用，已使用的不受影响
+        管理能力、职责、干员、赛事性质、赛事名称、分队性质、赛事地图等标签 · 拖拽手柄调整展示顺序 · 禁用后不可新用，已使用的不受影响
       </p>
 
       {/* 类型切换 */}
@@ -193,69 +236,29 @@ export default function AdminTagsPage() {
         <div className="win-card" style={{ padding: 40, textAlign: "center", color: "var(--win-text-tertiary)" }}>暂无标签</div>
       ) : (
         <div className="win-card" style={{ overflow: "hidden" }}>
-          {items.map((item, idx) => (
-            <div
-              key={item.id}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "12px 16px",
-                borderBottom: idx === items.length - 1 ? "none" : "1px solid var(--win-border)",
-                opacity: item.disabled ? 0.6 : 1,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 500, textDecoration: item.disabled ? "line-through" : "none" }}>
-                  {item.name}
-                </span>
-                {item.category && (
-                  <span className="win-chip" style={{ fontSize: 11 }}>
-                    {item.category === "INFANTRY" ? "步兵" : "载具"}
-                  </span>
-                )}
-                {item.faction && (
-                  <span className="win-chip" style={{ fontSize: 11 }}>{item.faction}</span>
-                )}
-                {item.disabled && (
-                  <span className="win-chip" style={{ fontSize: 11, background: "rgba(209,52,56,0.1)", color: "var(--win-danger)", borderColor: "var(--win-danger)" }}>
-                    已禁用
-                  </span>
-                )}
-                <span style={{ fontSize: 11, color: "var(--win-text-tertiary)" }}>
-                  已使用 {item.usedCount}
-                </span>
-              </div>
-              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                <button
-                  className="win-btn"
-                  style={{ fontSize: 12, padding: "4px 10px", minHeight: 26 }}
-                  onClick={() => {
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+              {items.map((item, idx) => (
+                <SortableTagRow
+                  key={item.id}
+                  item={item}
+                  isLast={idx === items.length - 1}
+                  onEdit={() => {
                     setEditTarget(item);
                     setName(item.name);
                     setFaction(item.faction || "");
                     setCategory(item.category || "INFANTRY");
                   }}
-                >
-                  编辑
-                </button>
-                <button
-                  className="win-btn"
-                  style={{ fontSize: 12, padding: "4px 10px", minHeight: 26, color: item.disabled ? "var(--win-success)" : "var(--win-warning)" }}
-                  onClick={() => handleToggleDisable(item)}
-                >
-                  {item.disabled ? "启用" : "禁用"}
-                </button>
-                <button
-                  className="win-btn"
-                  style={{ fontSize: 12, padding: "4px 10px", minHeight: 26, color: "var(--win-danger)" }}
-                  onClick={() => handleDelete(item)}
-                >
-                  删除
-                </button>
-              </div>
-            </div>
-          ))}
+                  onToggleDisable={() => handleToggleDisable(item)}
+                  onDelete={() => handleDelete(item)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         </div>
       )}
 
@@ -338,6 +341,107 @@ export default function AdminTagsPage() {
           )}
         </div>
       </Modal>
+    </div>
+  );
+}
+
+// 可拖拽的标签行：左侧拖拽手柄 + 标签信息 + 操作按钮
+function SortableTagRow({
+  item,
+  isLast,
+  onEdit,
+  onToggleDisable,
+  onDelete,
+}: {
+  item: TagItem;
+  isLast: boolean;
+  onEdit: () => void;
+  onToggleDisable: () => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "12px 16px",
+        borderBottom: isLast ? "none" : "1px solid var(--win-border)",
+        opacity: item.disabled ? 0.6 : 1,
+        background: isDragging ? "var(--win-bg-selected)" : undefined,
+        transform: CSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 10 : undefined,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+        {/* 拖拽手柄 */}
+        <span
+          {...attributes}
+          {...listeners}
+          style={{
+            cursor: "grab",
+            color: "var(--win-text-tertiary)",
+            flexShrink: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            padding: 2,
+            touchAction: "none",
+          }}
+          title="拖拽调整顺序"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="9" cy="6" r="1.5" /><circle cx="15" cy="6" r="1.5" />
+            <circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
+            <circle cx="9" cy="18" r="1.5" /><circle cx="15" cy="18" r="1.5" />
+          </svg>
+        </span>
+        <span style={{ fontSize: 14, fontWeight: 500, textDecoration: item.disabled ? "line-through" : "none" }}>
+          {item.name}
+        </span>
+        {item.category && (
+          <span className="win-chip" style={{ fontSize: 11 }}>
+            {item.category === "INFANTRY" ? "步兵" : "载具"}
+          </span>
+        )}
+        {item.faction && (
+          <span className="win-chip" style={{ fontSize: 11 }}>{item.faction}</span>
+        )}
+        {item.disabled && (
+          <span className="win-chip" style={{ fontSize: 11, background: "rgba(209,52,56,0.1)", color: "var(--win-danger)", borderColor: "var(--win-danger)" }}>
+            已禁用
+          </span>
+        )}
+        <span style={{ fontSize: 11, color: "var(--win-text-tertiary)" }}>
+          已使用 {item.usedCount}
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+        <button
+          className="win-btn"
+          style={{ fontSize: 12, padding: "4px 10px", minHeight: 26 }}
+          onClick={onEdit}
+        >
+          编辑
+        </button>
+        <button
+          className="win-btn"
+          style={{ fontSize: 12, padding: "4px 10px", minHeight: 26, color: item.disabled ? "var(--win-success)" : "var(--win-warning)" }}
+          onClick={onToggleDisable}
+        >
+          {item.disabled ? "启用" : "禁用"}
+        </button>
+        <button
+          className="win-btn"
+          style={{ fontSize: 12, padding: "4px 10px", minHeight: 26, color: "var(--win-danger)" }}
+          onClick={onDelete}
+        >
+          删除
+        </button>
+      </div>
     </div>
   );
 }
