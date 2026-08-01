@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { NAME_PREFIX } from "@/lib/constants";
@@ -24,6 +24,7 @@ interface MyInfo {
 export default function MePage() {
   const toast = useToast();
   const confirm = useConfirm();
+  const { update } = useSession();
 
   const [info, setInfo] = useState<MyInfo | null>(null);
   const [options, setOptions] = useState<{
@@ -87,6 +88,8 @@ export default function MePage() {
       return;
     }
     if (await patch({ nickname: tempNickname.trim() })) {
+      // 同步刷新 session 中的用户名，使导航栏等处立即显示新昵称
+      await update({ name: NAME_PREFIX + tempNickname.trim() });
       setEditingNickname(false);
     }
   };

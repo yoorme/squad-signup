@@ -42,10 +42,13 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       },
     });
 
-    await tx.invitationCode.update({
-      where: { id: code.id },
+    // 条件扣减：usedCount < maxUses 才扣减，依赖数据库行锁防止并发超额
+    // 若并发请求都已通过上面的检查，此处只有一个能成功 increment
+    const updated = await tx.invitationCode.updateMany({
+      where: { id: code.id, usedCount: { lt: code.maxUses } },
       data: { usedCount: { increment: 1 } },
     });
+    if (updated.count === 0) throw new Error("邀请码已用尽");
 
     return user;
   });
