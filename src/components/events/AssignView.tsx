@@ -99,12 +99,13 @@ export function AssignView({ eventId, onClose }: Props) {
         substitutes = prev.substitutes.filter((_, i) => i !== subIdx);
       }
       if (!member) return prev; // 找不到该队员，不更新
+      const movedMember = member; // 闭包内 member 类型收窄失效，用常量保存非空值
       if (targetSquadId === null) {
-        substitutes = [...substitutes, member];
+        substitutes = [...substitutes, movedMember];
       } else {
         squads = squads.map((s) =>
           s.id === targetSquadId
-            ? { ...s, members: [...s.members, member], registeredCount: s.registeredCount + 1 }
+            ? { ...s, members: [...s.members, movedMember], registeredCount: s.registeredCount + 1 }
             : s
         );
       }
