@@ -223,6 +223,9 @@ fetch_dist() {
   fi
 
   ok "产物已解压到 $INSTALL_DIR"
+
+  # 上传文件持久目录（独立于 standalone 产物，版本更新不丢图）
+  mkdir -p "$INSTALL_DIR/uploads"
 }
 
 # ---------------- 生成 .env ----------------
@@ -253,7 +256,8 @@ configure_env() {
   direct_url="${DIRECT_URL:-}"
   auth_secret="${AUTH_SECRET:-}"
   admin_user="${INITIAL_ADMIN_USERNAME:-MMR丨Admin}"
-  admin_pass="${INITIAL_ADMIN_PASSWORD:-admin123456}"
+  # 管理员初始密码默认随机生成（而非固定弱密码），用户可在交互中覆盖
+  admin_pass="${INITIAL_ADMIN_PASSWORD:-$(openssl rand -hex 8)}"
   site_url="${NEXTAUTH_URL:-}"
   trust_host="${AUTH_TRUST_HOST:-true}"
   port="${PORT:-$DEFAULT_PORT}"
@@ -291,6 +295,7 @@ EOF
     echo "INITIAL_ADMIN_PASSWORD=$(env_escape "$admin_pass")"
     echo "NEXTAUTH_URL=$(env_escape "$site_url")"
     echo "AUTH_TRUST_HOST=$(env_escape "$trust_host")"
+    echo "UPLOAD_DIR='$INSTALL_DIR/uploads'"
   } > "$env_file"
   chmod 600 "$env_file"
   ok ".env 已生成"

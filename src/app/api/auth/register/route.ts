@@ -2,10 +2,14 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { buildUsername } from "@/lib/constants";
 import { ok, fail, withErrorHandler } from "@/lib/api";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 import bcrypt from "bcryptjs";
 
-// 注册接口
+// 注册接口（限流：5 次/分钟/IP，防止爆破邀请码）
 export const POST = withErrorHandler(async (req: NextRequest) => {
+  const rl = rateLimit(`register:${clientIp(req)}`, 5, 60_000);
+  if (!rl.success) return fail("尝试过于频繁，请稍后再试", 429);
+
   const body = await req.json();
   const invitationCode = String(body?.invitationCode ?? "").trim();
   const nickname = String(body?.nickname ?? "").trim();

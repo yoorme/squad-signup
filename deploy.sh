@@ -39,30 +39,41 @@ echo ""
 echo "==> [3/7] 创建 .env 配置文件..."
 if [ -f ".env" ]; then
   echo ".env 已存在，跳过创建（如需重置请先删除 .env）"
+  GENERATED_ADMIN_PASSWORD=""
 else
-  cat > .env << 'EOF'
+  # 所有密钥现场随机生成，不落仓库、不复用默认值
+  GENERATED_DB_PASSWORD=$(openssl rand -hex 16)
+  GENERATED_AUTH_SECRET=$(openssl rand -base64 32)
+  GENERATED_ADMIN_PASSWORD=$(openssl rand -hex 8)
+  # 自动探测服务器公网 IP（失败则留待手动修改）
+  SERVER_IP=$(curl -fsSL --max-time 5 ifconfig.me 2>/dev/null || echo "YOUR_SERVER_IP")
+  cat > .env << EOF
 # PostgreSQL 数据库
 POSTGRES_USER=squad
-POSTGRES_PASSWORD=Squad2026SecurePwd_ChangeMe
+POSTGRES_PASSWORD=${GENERATED_DB_PASSWORD}
 POSTGRES_DB=squad_signup
 
-# NextAuth 密钥
-AUTH_SECRET=NUUoHnkR/cbNDulnf9s8lEEbhfIXF8nRZTVSjsOmwms=
+# NextAuth 密钥（已随机生成；轮换会使所有用户重新登录）
+AUTH_SECRET=${GENERATED_AUTH_SECRET}
 
-# 初始管理员
+# 初始管理员（随机初始密码仅在本脚本末尾显示一次，请立即登录修改）
 INITIAL_ADMIN_USERNAME=MMR丨Admin
-INITIAL_ADMIN_PASSWORD=admin123456
+INITIAL_ADMIN_PASSWORD=${GENERATED_ADMIN_PASSWORD}
 
-# 站点 URL（用 IP 访问）
-NEXTAUTH_URL=http://121.196.195.27:3000
+# 站点 URL（如探测不准确请手动改为实际 IP/域名）
+NEXTAUTH_URL=http://${SERVER_IP}:3000
 
 # 信任 Host（用 IP 访问必须为 true；用 HTTPS 域名可设为 false）
 AUTH_TRUST_HOST=true
+
+# 上传文件持久目录（容器内路径，对应 compose 的 uploads 卷）
+UPLOAD_DIR=/app/uploads
 EOF
-  echo ".env 已创建"
+  chmod 600 .env
+  echo ".env 已创建（密钥均为随机生成）"
 fi
 echo "--- .env 内容（密码已隐藏）---"
-sed 's/PASSWORD=.*/PASSWORD=***/' .env
+sed -E 's/(PASSWORD|SECRET)=.*/\1=***/' .env
 
 # 4. 检查安全组/防火墙
 echo ""
@@ -103,9 +114,13 @@ echo "========================================="
 echo "  部署完成！"
 echo "========================================="
 echo ""
-echo "访问地址: http://121.196.195.27:3000"
+echo "访问地址: $(grep '^NEXTAUTH_URL=' .env | cut -d= -f2)"
 echo "登录账号: MMR丨Admin"
-echo "登录密码: admin123456"
+if [ -n "${GENERATED_ADMIN_PASSWORD:-}" ]; then
+  echo "登录密码: ${GENERATED_ADMIN_PASSWORD}  （仅本次显示，请立即登录后修改）"
+else
+  echo "登录密码: 使用 .env 中既有配置"
+fi
 echo ""
 echo "如无法访问，请检查："
 echo "1. 阿里云安全组是否放行 3000 端口（TCP 入方向）"

@@ -1,4 +1,6 @@
 // 全局常量与工具函数
+import { randomInt } from "crypto";
+
 export const NAME_PREFIX = "MMR丨";
 
 // 拼接完整用户名
@@ -24,12 +26,12 @@ export function isValidSquadCount(requiredCount: number, squadCount: number): bo
   return total >= requiredCount && total - requiredCount < 4;
 }
 
-// 生成随机邀请码
+// 生成随机邀请码（使用加密安全随机数，不可预测）
 export function generateInvitationCode(length: number = 8): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let result = "";
   for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+    result += chars.charAt(randomInt(chars.length));
   }
   return result;
 }

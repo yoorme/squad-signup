@@ -31,12 +31,12 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-# 安装运行时需要的 CLI 工具（锁定 prisma 大版本，与 package.json 保持一致）
-RUN npm i -g tsx prisma@6
+# 安装运行时需要的 CLI 工具（锁定精确版本，与 package.json 保持一致，避免上游变更破坏构建）
+RUN npm i -g tsx@4.23.1 prisma@6.19.3
 
 # bcryptjs 用于 docker-entrypoint.sh 中 seed 脚本的密码加密
 # （standalone 模式不打包非追踪依赖，需在运行阶段单独安装）
-RUN npm i bcryptjs
+RUN npm i bcryptjs@3.0.3
 
 # 仅复制运行时所需文件
 COPY --from=builder /app/public ./public
@@ -51,6 +51,16 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 # 启动脚本：先迁移+种子，再启动 Next.js
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
+
+# 上传文件持久目录（compose 挂载 uploads 卷；独立于应用代码目录）
+RUN mkdir -p /app/uploads
+
+# 以非 root 用户运行，降低容器逃逸风险
+RUN addgroup -S nodejs && adduser -S nextjs -G nodejs \
+  && mkdir -p /home/nextjs \
+  && chown -R nextjs:nodejs /app /home/nextjs
+ENV HOME=/home/nextjs
+USER nextjs
 
 EXPOSE 3000
 

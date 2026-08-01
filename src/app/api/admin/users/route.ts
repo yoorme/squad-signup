@@ -34,9 +34,21 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   const id = String(body?.id ?? "");
   if (!id) return fail("缺少用户 ID");
 
-  const data: any = {};
-  if (body.role !== undefined) data.role = body.role;
-  if (body.disabled !== undefined) data.disabled = body.disabled;
+  // 严格校验输入类型与取值，防止脏数据写库
+  const data: { role?: "ADMIN" | "MEMBER"; disabled?: boolean } = {};
+  if (body.role !== undefined) {
+    if (body.role !== "ADMIN" && body.role !== "MEMBER") {
+      return fail("无效的角色取值");
+    }
+    data.role = body.role;
+  }
+  if (body.disabled !== undefined) {
+    if (typeof body.disabled !== "boolean") {
+      return fail("disabled 必须是布尔值");
+    }
+    data.disabled = body.disabled;
+  }
+  if (Object.keys(data).length === 0) return fail("没有需要修改的字段");
 
   // 不能禁用/降级最后一个管理员
   if (data.role === "MEMBER" || data.disabled === true) {

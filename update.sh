@@ -50,6 +50,14 @@ if [[ -n "$env_backup" ]]; then
   cp "$env_backup" "$INSTALL_DIR/.env"
   rm -f "$env_backup"
 fi
+
+# 上传文件持久目录（独立于 standalone 产物，版本更新不丢图）
+mkdir -p "$INSTALL_DIR/uploads"
+# 老版本 .env 可能缺少 UPLOAD_DIR，自动补齐
+if ! grep -q '^UPLOAD_DIR=' "$INSTALL_DIR/.env" 2>/dev/null; then
+  echo "UPLOAD_DIR='$INSTALL_DIR/uploads'" >> "$INSTALL_DIR/.env"
+  echo "✓ 已向 .env 补充 UPLOAD_DIR 配置"
+fi
 echo "✓ 产物已更新"
 
 echo "▶ 3/4 数据库迁移..."
