@@ -169,6 +169,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       nature: e.nature,
       name: e.name,
       customName: e.customName,
+      opponent: e.opponent,
       map: e.map,
       createdAt: e.createdAt,
       isRead: myReadSet.has(e.id),
@@ -210,6 +211,7 @@ function serializeEventDetail(
     nature: e.nature,
     name: e.name,
     customName: e.customName,
+    opponent: e.opponent,
     map: e.map,
     createdAt: e.createdAt,
     version,
@@ -246,12 +248,13 @@ function serializeEventDetail(
 export const POST = withErrorHandler(async (req: NextRequest) => {
   const user = await requireAdmin();
   const body = await req.json();
-  const { eventTime, natureId, nameId, customName, mapId, requiredCount, squadNatures, format } = body as {
+  const { eventTime, natureId, nameId, customName, mapId, opponent, requiredCount, squadNatures, format } = body as {
     eventTime: string;
     natureId: string;
     nameId?: string | null; // 赛事名称（可选）：null/空 = "未知"（不展示名称）；非空 = 关联标签
     customName?: string | null; // "其他"时管理员输入的自定义临时名称（最少 1 字符）
     mapId?: string | null; // 赛事地图（可选，null/undefined 表示未选择）
+    opponent?: string | null; // 对手（必填，展示时拼接在性质后）
     requiredCount: number;
     squadNatures: string[]; // 每支队伍的性质 ID 列表
     format?: "BO3" | "BO5" | "R2" | null; // 赛制，null/undefined 表示未知
@@ -320,12 +323,14 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   const eventDate = new Date(eventTime);
   if (isNaN(eventDate.getTime())) return fail("时间格式错误");
 
-  // 主体字 title：未知模式仅显示赛事性质，否则显示「名称 - 性质」
+  // 对手校验：必填，trim 后非空
+  const trimmedOpponent = opponent ? opponent.trim() : "";
+  if (!trimmedOpponent) return fail("请输入对手");
+
+  // 主体字 title：名称 - 性质 - 对手 - 时间（无名称时省略名称段）
   const displayName = name ? name.name : useCustomName ? trimmedCustom : "";
   const timeStr = eventDate.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-  const title = displayName
-    ? `${displayName} - ${nature.name} - ${timeStr}`
-    : `${nature.name} - ${timeStr}`;
+  const title = [displayName, nature.name, trimmedOpponent, timeStr].filter(Boolean).join(" - ");
 
   const event = await prisma.$transaction(async (tx) => {
     const ev = await tx.event.create({
@@ -336,6 +341,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         nameId: nameId || null,
         customName: useCustomName ? trimmedCustom : null,
         mapId: mapRecord?.id ?? null,
+        opponent: trimmedOpponent,
         requiredCount: required,
         format: formatValue,
         createdById: user.id,

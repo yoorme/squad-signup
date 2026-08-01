@@ -199,6 +199,7 @@ model Event {
   nameId        String? // 赛事名称（可选：null 表示"未知"，不展示名称）
   customName    String? // 自定义临时名称（"其他"时管理员输入，最少 1 字符）
   mapId         String? // 赛事地图（可选，未选择时为 null）
+  opponent      String? // 对手（创建时必填，展示时拼接在性质后）
   requiredCount Int
   format        EventFormat? // 赛制：BO3 / BO5 / R2，null 表示未知（不展示）
   status        EventStatus @default(UPCOMING)

@@ -25,6 +25,7 @@ interface EventItem {
   nature: { id: string; name: string };
   name: { id: string; name: string } | null;
   customName: string | null;
+  opponent: string | null;
   map: { id: string; name: string } | null;
   squads: Squad[];
 }
@@ -86,7 +87,7 @@ export default function AdminEventsPage() {
   // 保存赛事标签/赛制/分队性质/地图
   const handleSaveEdit = async (
     ev: EventItem,
-    patch: { natureId?: string; nameId?: string | null; customName?: string | null; mapId?: string | null; format?: "BO3" | "BO5" | "R2" | null; squads?: { id: string; natureId: string }[] }
+    patch: { natureId?: string; nameId?: string | null; customName?: string | null; opponent?: string | null; mapId?: string | null; format?: "BO3" | "BO5" | "R2" | null; squads?: { id: string; natureId: string }[] }
   ) => {
     const res = await fetch("/api/events/manage", {
       method: "PATCH",
@@ -194,6 +195,7 @@ function EventEditCard({
   const [nameId, setNameId] = useState(ev.name?.id ?? "");
   const [customName, setCustomName] = useState(ev.customName ?? "");
   const [mapId, setMapId] = useState(ev.map?.id ?? "");
+  const [opponent, setOpponent] = useState(ev.opponent ?? "");
   const [format, setFormat] = useState<"BO3" | "BO5" | "R2" | null>(ev.format);
   const [squadNatures, setSquadNatures] = useState<Record<string, string>>(
     Object.fromEntries(ev.squads.map((s) => [s.id, s.nature.id]))
@@ -215,9 +217,10 @@ function EventEditCard({
     setNameId(ev.name?.id ?? "");
     setCustomName(ev.customName ?? "");
     setMapId(ev.map?.id ?? "");
+    setOpponent(ev.opponent ?? "");
     setFormat(ev.format);
     setSquadNatures(Object.fromEntries(ev.squads.map((s) => [s.id, s.nature.id])));
-  }, [ev.id, ev.nature.id, ev.name?.id, ev.customName, ev.map?.id, ev.format]);
+  }, [ev.id, ev.nature.id, ev.name?.id, ev.customName, ev.opponent, ev.map?.id, ev.format]);
 
   const isArchived = ev.status === "ARCHIVED";
 
@@ -231,6 +234,7 @@ function EventEditCard({
     natureId !== ev.nature.id ||
     nameChanged ||
     mapId !== (ev.map?.id ?? "") ||
+    opponent.trim() !== (ev.opponent ?? "") ||
     format !== ev.format ||
     ev.squads.some((s) => squadNatures[s.id] !== s.nature.id);
 
@@ -246,6 +250,9 @@ function EventEditCard({
             )}
             {ev.map && (
               <span className="win-chip" style={{ fontSize: 11 }}>{ev.map.name}</span>
+            )}
+            {ev.opponent && (
+              <span className="win-chip" style={{ fontSize: 11 }}>对手：{ev.opponent}</span>
             )}
             {ev.format && (
               <span className="win-chip" style={{ fontSize: 11, background: "var(--win-bg-selected)", color: "var(--win-accent)", borderColor: "var(--win-accent)" }}>
@@ -286,7 +293,7 @@ function EventEditCard({
       {editing && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--win-border)", display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
-            <label className="win-label">赛事性质（长按或右键标签编辑/删除，+ 新增）</label>
+            <label className="win-label">赛事性质</label>
             <TagEditor type="nature" selectedId={natureId} onSelect={setNatureId} />
           </div>
           <div>
@@ -332,7 +339,18 @@ function EventEditCard({
             )}
           </div>
           <div>
-            <label className="win-label">赛事地图（可选，点击「未知」清空）</label>
+            <label className="win-label">对手</label>
+            <input
+              type="text"
+              className="win-input"
+              value={opponent}
+              onChange={(e) => setOpponent(e.target.value)}
+              placeholder="请输入对手名称"
+              style={{ maxWidth: 320 }}
+            />
+          </div>
+          <div>
+            <label className="win-label">赛事地图</label>
             <TagEditor type="map" selectedId={mapId} onSelect={setMapId} />
           </div>
           <div>
@@ -360,7 +378,7 @@ function EventEditCard({
             </div>
           </div>
           <div>
-            <label className="win-label">分队性质（每队可独立设置）</label>
+            <label className="win-label">分队性质</label>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {ev.squads.map((s) => (
                 <div key={s.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -390,6 +408,7 @@ function EventEditCard({
                   patch.customName = nameMode === "other" ? customName.trim() : null;
                 }
                 if (mapId !== (ev.map?.id ?? "")) patch.mapId = mapId || null;
+                if (opponent.trim() !== (ev.opponent ?? "")) patch.opponent = opponent.trim();
                 if (format !== ev.format) patch.format = format;
                 const changedSquads = ev.squads
                   .filter((s) => squadNatures[s.id] !== s.nature.id)

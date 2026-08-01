@@ -28,6 +28,8 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   const customName = body?.customName as string | null | undefined;
   // mapId: null = 清空地图；undefined = 不修改；string = 切换到指定地图
   const mapId = body?.mapId as string | null | undefined;
+  // opponent: string = 修改对手；null = 清空；undefined = 不修改
+  const opponent = body?.opponent as string | null | undefined;
   const format = body?.format as "BO3" | "BO5" | "R2" | null | undefined;
   // 分队性质修改：[{ squadId, natureId }]
   const squadUpdates = body?.squads as { id: string; natureId: string }[] | undefined;
@@ -80,10 +82,11 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     if (nameId !== undefined) evData.nameId = nameId || null; // null = 清空名称
     if (customName !== undefined) evData.customName = customName ? customName.trim() : null;
     if (mapId !== undefined) evData.mapId = mapId; // null = 清空，string = 切换
+    if (opponent !== undefined) evData.opponent = opponent ? opponent.trim() : null;
     if (format !== undefined) evData.format = format;
 
-    // 当 name / customName / nature 任一变化时，同步重生成 title
-    const titleDirty = nameId !== undefined || customName !== undefined || natureId !== undefined;
+    // 当 name / customName / nature / opponent 任一变化时，同步重生成 title
+    const titleDirty = nameId !== undefined || customName !== undefined || natureId !== undefined || opponent !== undefined;
     if (titleDirty) {
       const ev = await tx.event.findUnique({ where: { id }, include: { nature: true, name: true } });
       if (ev) {
@@ -103,10 +106,10 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
           } else {
             displayName = ev.name?.name ?? ev.customName ?? "";
           }
+          // 确定当前对手：传了新值用新值，否则用已有值
+          const currentOpponent = opponent !== undefined ? (opponent ? opponent.trim() : "") : (ev.opponent ?? "");
           const timeStr = ev.eventTime.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-          evData.title = displayName
-            ? `${displayName} - ${nature.name} - ${timeStr}`
-            : `${nature.name} - ${timeStr}`;
+          evData.title = [displayName, nature.name, currentOpponent, timeStr].filter(Boolean).join(" - ");
         }
       }
     }

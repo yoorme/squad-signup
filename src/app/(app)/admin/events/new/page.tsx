@@ -32,6 +32,7 @@ export default function NewEventPage() {
   const [requiredCount, setRequiredCount] = useState("20");
   const [format, setFormat] = useState<"BO3" | "BO5" | "R2" | null>(null);
   const [squadNatures, setSquadNatures] = useState<string[]>([]);
+  const [opponent, setOpponent] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -92,6 +93,10 @@ export default function NewEventPage() {
       toast("请为每支分队选择性质", "warning");
       return;
     }
+    if (!opponent.trim()) {
+      toast("请输入对手", "warning");
+      return;
+    }
     setSaving(true);
     const res = await fetch("/api/events", {
       method: "POST",
@@ -105,6 +110,7 @@ export default function NewEventPage() {
         requiredCount: requiredNum,
         format,
         squadNatures,
+        opponent: opponent.trim(),
       }),
     });
     const data = await res.json();
@@ -214,6 +220,19 @@ export default function NewEventPage() {
               不展示赛事名称，主体字仅显示赛事性质
             </span>
           )}
+        </div>
+
+        {/* 对手 */}
+        <div>
+          <label className="win-label">对手</label>
+          <input
+            type="text"
+            className="win-input"
+            value={opponent}
+            onChange={(e) => setOpponent(e.target.value)}
+            placeholder="请输入对手名称"
+            style={{ maxWidth: 320 }}
+          />
         </div>
 
         {/* 赛事地图（可选） */}
