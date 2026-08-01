@@ -23,6 +23,7 @@ interface EventItem {
   format: "BO3" | "BO5" | "R2" | null;
   nature: { id: string; name: string };
   name: { id: string; name: string };
+  map: { id: string; name: string } | null;
   squads: Squad[];
 }
 
@@ -79,10 +80,10 @@ export default function AdminEventsPage() {
     }
   };
 
-  // 保存赛事标签/赛制/分队性质
+  // 保存赛事标签/赛制/分队性质/地图
   const handleSaveEdit = async (
     ev: EventItem,
-    patch: { natureId?: string; nameId?: string; format?: "BO3" | "BO5" | "R2" | null; squads?: { id: string; natureId: string }[] }
+    patch: { natureId?: string; nameId?: string; mapId?: string | null; format?: "BO3" | "BO5" | "R2" | null; squads?: { id: string; natureId: string }[] }
   ) => {
     const res = await fetch("/api/events/manage", {
       method: "PATCH",
@@ -172,6 +173,7 @@ function EventEditCard({
 }) {
   const [natureId, setNatureId] = useState(ev.nature.id);
   const [nameId, setNameId] = useState(ev.name.id);
+  const [mapId, setMapId] = useState(ev.map?.id ?? "");
   const [format, setFormat] = useState<"BO3" | "BO5" | "R2" | null>(ev.format);
   const [squadNatures, setSquadNatures] = useState<Record<string, string>>(
     Object.fromEntries(ev.squads.map((s) => [s.id, s.nature.id]))
@@ -181,15 +183,17 @@ function EventEditCard({
   useEffect(() => {
     setNatureId(ev.nature.id);
     setNameId(ev.name.id);
+    setMapId(ev.map?.id ?? "");
     setFormat(ev.format);
     setSquadNatures(Object.fromEntries(ev.squads.map((s) => [s.id, s.nature.id])));
-  }, [ev.id, ev.nature.id, ev.name.id, ev.format]);
+  }, [ev.id, ev.nature.id, ev.name.id, ev.map?.id, ev.format]);
 
   const isArchived = ev.status === "ARCHIVED";
 
   const dirty =
     natureId !== ev.nature.id ||
     nameId !== ev.name.id ||
+    mapId !== (ev.map?.id ?? "") ||
     format !== ev.format ||
     ev.squads.some((s) => squadNatures[s.id] !== s.nature.id);
 
@@ -201,6 +205,9 @@ function EventEditCard({
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
             <span className="win-chip" style={{ fontSize: 11 }}>{ev.nature.name}</span>
             <span className="win-chip" style={{ fontSize: 11 }}>{ev.name.name}</span>
+            {ev.map && (
+              <span className="win-chip" style={{ fontSize: 11 }}>{ev.map.name}</span>
+            )}
             {ev.format && (
               <span className="win-chip" style={{ fontSize: 11, background: "var(--win-bg-selected)", color: "var(--win-accent)", borderColor: "var(--win-accent)" }}>
                 {ev.format}
@@ -236,6 +243,10 @@ function EventEditCard({
           <div>
             <label className="win-label">赛事名称</label>
             <TagEditor type="name" selectedId={nameId} onSelect={setNameId} />
+          </div>
+          <div>
+            <label className="win-label">赛事地图（可选，点击「未选择」清空）</label>
+            <TagEditor type="map" selectedId={mapId} onSelect={setMapId} />
           </div>
           <div>
             <label className="win-label">赛制</label>
@@ -287,6 +298,7 @@ function EventEditCard({
                 const patch: any = {};
                 if (natureId !== ev.nature.id) patch.natureId = natureId;
                 if (nameId !== ev.name.id) patch.nameId = nameId;
+                if (mapId !== (ev.map?.id ?? "")) patch.mapId = mapId || null;
                 if (format !== ev.format) patch.format = format;
                 const changedSquads = ev.squads
                   .filter((s) => squadNatures[s.id] !== s.nature.id)

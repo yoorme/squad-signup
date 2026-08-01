@@ -13,7 +13,7 @@ export const DELETE = withErrorHandler(async (req: NextRequest) => {
   return ok({ success: true });
 });
 
-// 归档/恢复赛事状态 + 修改赛事标签/赛制/分队性质（管理员）
+// 归档/恢复赛事状态 + 修改赛事标签/赛制/分队性质/地图（管理员）
 export const PATCH = withErrorHandler(async (req: NextRequest) => {
   await requireAdmin();
   const body = await req.json();
@@ -23,6 +23,8 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   const status = body?.status as "UPCOMING" | "ARCHIVED" | undefined;
   const natureId = body?.natureId as string | undefined;
   const nameId = body?.nameId as string | undefined;
+  // mapId: null = 清空地图；undefined = 不修改；string = 切换到指定地图
+  const mapId = body?.mapId as string | null | undefined;
   const format = body?.format as "BO3" | "BO5" | "R2" | null | undefined;
   // 分队性质修改：[{ squadId, natureId }]
   const squadUpdates = body?.squads as { id: string; natureId: string }[] | undefined;
@@ -45,6 +47,12 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     if (!n) return fail("赛事名称不存在");
     if (n.disabled) return fail("赛事名称已被禁用，请选择其他标签");
   }
+  // 校验地图存在且未被禁用（仅当指定非 null 的 mapId 时校验）
+  if (mapId) {
+    const m = await prisma.eventMap.findUnique({ where: { id: mapId } });
+    if (!m) return fail("赛事地图不存在");
+    if (m.disabled) return fail("赛事地图已被禁用，请选择其他标签");
+  }
   // 校验分队性质存在且未被禁用
   if (squadUpdates && squadUpdates.length > 0) {
     const snIds = [...new Set(squadUpdates.map((su) => su.natureId))];
@@ -62,19 +70,22 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     const evData: any = {};
     if (status) evData.status = status;
     if (natureId) evData.natureId = natureId;
-    if (nameId) {
-      evData.nameId = nameId;
-      // 同步重生成 title
+    if (nameId) evData.nameId = nameId;
+    if (mapId !== undefined) evData.mapId = mapId; // null = 清空，string = 切换
+    if (format !== undefined) evData.format = format;
+
+    // 当 name 或 nature 变化时，同步重生成 title（任一变化都需重生成，避免标题残留旧名称）
+    if (nameId || natureId) {
       const ev = await tx.event.findUnique({ where: { id }, include: { nature: true, name: true } });
       if (ev) {
-        const name = await tx.eventName.findUnique({ where: { id: nameId } });
+        const name = nameId ? await tx.eventName.findUnique({ where: { id: nameId } }) : ev.name;
         const nature = natureId ? await tx.eventNature.findUnique({ where: { id: natureId } }) : ev.nature;
         if (name && nature) {
           evData.title = `${name.name} - ${nature.name} - ${ev.eventTime.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
         }
       }
     }
-    if (format !== undefined) evData.format = format;
+
     if (Object.keys(evData).length > 0) {
       await tx.event.update({ where: { id }, data: evData });
     }

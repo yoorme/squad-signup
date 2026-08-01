@@ -10,6 +10,7 @@ type EventDetailPayload = Prisma.EventGetPayload<{
   include: {
     nature: true;
     name: true;
+    map: true;
     squads: {
       orderBy: { index: "asc" };
       include: {
@@ -61,6 +62,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       include: {
         nature: true,
         name: true,
+        map: true,
         squads: {
           orderBy: { index: "asc" },
           include: {
@@ -125,6 +127,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
     include: {
       nature: true,
       name: true,
+      map: true,
       squads: {
         orderBy: { index: "asc" },
         include: {
@@ -165,6 +168,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       format: e.format,
       nature: e.nature,
       name: e.name,
+      map: e.map,
       createdAt: e.createdAt,
       isRead: myReadSet.has(e.id),
       squads: e.squads.map((s) => ({
@@ -204,6 +208,7 @@ function serializeEventDetail(
     format: e.format,
     nature: e.nature,
     name: e.name,
+    map: e.map,
     createdAt: e.createdAt,
     version,
     squads: e.squads.map((s) => ({
@@ -239,10 +244,11 @@ function serializeEventDetail(
 export const POST = withErrorHandler(async (req: NextRequest) => {
   const user = await requireAdmin();
   const body = await req.json();
-  const { eventTime, natureId, nameId, requiredCount, squadNatures, format } = body as {
+  const { eventTime, natureId, nameId, mapId, requiredCount, squadNatures, format } = body as {
     eventTime: string;
     natureId: string;
     nameId: string;
+    mapId?: string | null; // 赛事地图（可选，null/undefined 表示未选择）
     requiredCount: number;
     squadNatures: string[]; // 每支队伍的性质 ID 列表
     format?: "BO3" | "BO5" | "R2" | null; // 赛制，null/undefined 表示未知
@@ -276,6 +282,14 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   if (!name) return fail("赛事名称不存在");
   if (name.disabled) return fail("赛事名称已被禁用，请选择其他标签");
 
+  // 校验地图存在且未被禁用（可选，未传则跳过）
+  let mapRecord = null;
+  if (mapId) {
+    mapRecord = await prisma.eventMap.findUnique({ where: { id: mapId } });
+    if (!mapRecord) return fail("赛事地图不存在");
+    if (mapRecord.disabled) return fail("赛事地图已被禁用，请选择其他标签");
+  }
+
   // 校验分队性质存在且未被禁用
   const squadNatureIds = [...new Set(squadNatures)];
   const squadNatures_db = await prisma.squadNature.findMany({
@@ -300,6 +314,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         eventTime: eventDate,
         natureId,
         nameId,
+        mapId: mapRecord?.id ?? null,
         requiredCount: required,
         format: formatValue,
         createdById: user.id,

@@ -6,6 +6,7 @@ import { formatDateTime } from "@/lib/constants";
 
 interface Nature { id: string; name: string; }
 interface Name { id: string; name: string; }
+interface EventMap { id: string; name: string; }
 interface SquadNature { id: string; name: string; }
 
 interface Squad {
@@ -24,6 +25,7 @@ interface EventListItem {
   format: "BO3" | "BO5" | "R2" | null;
   nature: Nature;
   name: Name;
+  map: EventMap | null;
   squads: Squad[];
   totalRegistered: number;
   totalSubstitutes: number;
@@ -130,6 +132,9 @@ function EventCard({ event }: { event: EventListItem }) {
               {event.nature.name}
             </span>
             <span className="win-chip" style={{ fontSize: 11 }}>{event.name.name}</span>
+            {event.map && (
+              <span className="win-chip" style={{ fontSize: 11 }}>{event.map.name}</span>
+            )}
             {event.format && (
               <span className="win-chip" style={{ fontSize: 11, background: "var(--win-bg-selected)", color: "var(--win-accent)", borderColor: "var(--win-accent)" }}>
                 {event.format}

@@ -4,7 +4,7 @@ import { requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
 
 // 标签类型
-type TagType = "ability" | "duty" | "operator" | "nature" | "name" | "squadNature";
+type TagType = "ability" | "duty" | "operator" | "nature" | "name" | "squadNature" | "map";
 
 // 获取某类型标签列表（含使用情况 + disabled 状态）
 async function getTags(type: TagType) {
@@ -50,6 +50,13 @@ async function getTags(type: TagType) {
         include: { _count: { select: { squads: true } } },
       });
       return items.map((i) => ({ ...i, usedCount: i._count.squads }));
+    }
+    case "map": {
+      const items = await prisma.eventMap.findMany({
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+        include: { _count: { select: { events: true } } },
+      });
+      return items.map((i) => ({ ...i, usedCount: i._count.events }));
     }
   }
 }
@@ -102,7 +109,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     // 被使用的标签无法删除（外键约束），提示改用禁用
     const usedCount = await checkTagUsed(type, body.id);
     if (usedCount > 0) {
-      const who = ["nature", "name", "squadNature"].includes(type) ? "赛事" : "名用户";
+      const who = ["nature", "name", "squadNature", "map"].includes(type) ? "赛事" : "名用户";
       return fail(`该标签已被 ${usedCount} 个${who}使用，无法删除。请改用「禁用」`);
     }
     await deleteTag(type, body.id);
@@ -120,6 +127,7 @@ async function getNextSortOrder(type: TagType): Promise<number> {
   if (type === "nature") max = (await prisma.eventNature.aggregate({ _max: { sortOrder: true } }))._max.sortOrder ?? 0;
   if (type === "name") max = (await prisma.eventName.aggregate({ _max: { sortOrder: true } }))._max.sortOrder ?? 0;
   if (type === "squadNature") max = (await prisma.squadNature.aggregate({ _max: { sortOrder: true } }))._max.sortOrder ?? 0;
+  if (type === "map") max = (await prisma.eventMap.aggregate({ _max: { sortOrder: true } }))._max.sortOrder ?? 0;
   return max + 1;
 }
 
@@ -132,6 +140,7 @@ async function createTag(type: TagType, name: string, sortOrder: number, categor
   if (type === "nature") return prisma.eventNature.create({ data: { name, sortOrder } });
   if (type === "name") return prisma.eventName.create({ data: { name, sortOrder } });
   if (type === "squadNature") return prisma.squadNature.create({ data: { name, sortOrder } });
+  if (type === "map") return prisma.eventMap.create({ data: { name, sortOrder } });
   throw new Error("无效类型");
 }
 
@@ -144,6 +153,7 @@ async function updateTag(type: TagType, id: string, name: string, category?: str
   if (type === "nature") return prisma.eventNature.update({ where: { id }, data: { name } });
   if (type === "name") return prisma.eventName.update({ where: { id }, data: { name } });
   if (type === "squadNature") return prisma.squadNature.update({ where: { id }, data: { name } });
+  if (type === "map") return prisma.eventMap.update({ where: { id }, data: { name } });
   throw new Error("无效类型");
 }
 
@@ -154,6 +164,7 @@ async function deleteTag(type: TagType, id: string) {
   if (type === "nature") return prisma.eventNature.delete({ where: { id } });
   if (type === "name") return prisma.eventName.delete({ where: { id } });
   if (type === "squadNature") return prisma.squadNature.delete({ where: { id } });
+  if (type === "map") return prisma.eventMap.delete({ where: { id } });
   throw new Error("无效类型");
 }
 
@@ -166,6 +177,7 @@ async function toggleDisableTag(type: TagType, id: string, disabled: boolean) {
   if (type === "nature") return (await prisma.eventNature.update({ where: { id }, data })).disabled;
   if (type === "name") return (await prisma.eventName.update({ where: { id }, data })).disabled;
   if (type === "squadNature") return (await prisma.squadNature.update({ where: { id }, data })).disabled;
+  if (type === "map") return (await prisma.eventMap.update({ where: { id }, data })).disabled;
   throw new Error("无效类型");
 }
 
@@ -176,5 +188,6 @@ async function checkTagUsed(type: TagType, id: string): Promise<number> {
   if (type === "nature") return prisma.event.count({ where: { natureId: id } });
   if (type === "name") return prisma.event.count({ where: { nameId: id } });
   if (type === "squadNature") return prisma.squad.count({ where: { natureId: id } });
+  if (type === "map") return prisma.event.count({ where: { mapId: id } });
   return 0;
 }

@@ -77,9 +77,28 @@ export default function AdminInvitationsPage() {
     }
   };
 
-  const handleCopy = (code: string) => {
-    navigator.clipboard?.writeText(code);
-    toast("已复制", "success");
+  // 复制邀请码到剪贴板：优先使用 Clipboard API，失败则降级到 execCommand 兼容非安全上下文（HTTP）
+  const handleCopy = async (code: string) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(code);
+      } else {
+        // 降级方案：临时 textarea + execCommand('copy')
+        const textarea = document.createElement("textarea");
+        textarea.value = code;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        if (!ok) throw new Error("execCommand failed");
+      }
+      toast("已复制", "success");
+    } catch {
+      toast("复制失败，请手动复制", "error");
+    }
   };
 
   return (

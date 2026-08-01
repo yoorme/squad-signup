@@ -5,7 +5,7 @@ export default function AdminHome() {
     {
       href: "/admin/tags",
       title: "标签维护",
-      desc: "管理能力、职责、干员、赛事性质、赛事名称、分队性质等标签",
+      desc: "管理能力、职责、干员、赛事性质、赛事名称、分队性质、赛事地图等标签",
       icon: "🏷️",
     },
     {
@@ -29,7 +29,7 @@ export default function AdminHome() {
     {
       href: "/admin/events",
       title: "赛事管理",
-      desc: "创建赛事、修改赛事标签与分队性质",
+      desc: "创建赛事、修改赛事标签、地图与分队性质",
       icon: "🏆",
     },
   ];

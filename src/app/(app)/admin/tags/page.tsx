@@ -6,7 +6,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { Modal } from "@/components/ui/Modal";
 
-type TagType = "ability" | "duty" | "operator" | "nature" | "name" | "squadNature";
+type TagType = "ability" | "duty" | "operator" | "nature" | "name" | "squadNature" | "map";
 
 interface TagItem {
   id: string;
@@ -25,6 +25,7 @@ const TAG_META: Record<TagType, { label: string; hasCategory?: boolean; hasFacti
   nature: { label: "赛事性质", isEventTag: true },
   name: { label: "赛事名称", isEventTag: true },
   squadNature: { label: "分队性质", isEventTag: true },
+  map: { label: "赛事地图", isEventTag: true },
 };
 
 export default function AdminTagsPage() {
@@ -152,7 +153,7 @@ export default function AdminTagsPage() {
 
       <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 4 }}>标签维护</h1>
       <p style={{ fontSize: 13, color: "var(--win-text-secondary)", marginBottom: 24 }}>
-        管理能力、职责、干员、赛事性质、赛事名称、分队性质等标签 · 禁用后不可新用，已使用的不受影响
+        管理能力、职责、干员、赛事性质、赛事名称、分队性质、赛事地图等标签 · 禁用后不可新用，已使用的不受影响
       </p>
 
       {/* 类型切换 */}

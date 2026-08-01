@@ -92,7 +92,17 @@ async function main() {
     });
   }
 
-  // 8. 干员名单（三角洲行动）
+  // 8. 赛事地图（三角洲行动默认地图）
+  const maps = ["攀升", "烬区", "风暴眼", "临界点", "堑壕战", "断层", "断轨"];
+  for (let i = 0; i < maps.length; i++) {
+    await prisma.eventMap.upsert({
+      where: { name: maps[i] },
+      update: {},
+      create: { name: maps[i], sortOrder: i },
+    });
+  }
+
+  // 9. 干员名单（三角洲行动）
   const operators = [
     "红狼", "薰", "蔓属", "骇爪", "深紫", "露娜", "乌鸦", "月辉",
     "焰影", "虞蛇", "佐娅", "蜂医", "霸王", "狱焰", "刃影", "猎隼",

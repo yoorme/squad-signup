@@ -11,19 +11,21 @@ interface Tags {
   natures: TagItem[];
   names: TagItem[];
   squadNatures: TagItem[];
+  maps: TagItem[];
 }
 
 export default function NewEventPage() {
   const router = useRouter();
   const toast = useToast();
 
-  const [tags, setTags] = useState<Tags>({ natures: [], names: [], squadNatures: [] });
+  const [tags, setTags] = useState<Tags>({ natures: [], names: [], squadNatures: [], maps: [] });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [eventTime, setEventTime] = useState("");
   const [natureId, setNatureId] = useState("");
   const [nameId, setNameId] = useState("");
+  const [mapId, setMapId] = useState("");
   const [requiredCount, setRequiredCount] = useState("16");
   const [format, setFormat] = useState<"BO3" | "BO5" | "R2" | null>(null);
   const [squadNatures, setSquadNatures] = useState<string[]>([]);
@@ -83,6 +85,7 @@ export default function NewEventPage() {
         eventTime,
         natureId,
         nameId,
+        mapId: mapId || null,
         requiredCount: requiredNum,
         format,
         squadNatures,
@@ -161,6 +164,34 @@ export default function NewEventPage() {
           </div>
           {tags.names.length === 0 && (
             <span style={{ fontSize: 12, color: "var(--win-text-tertiary)" }}>请先在标签维护中添加赛事名称</span>
+          )}
+        </div>
+
+        {/* 赛事地图（可选） */}
+        <div>
+          <label className="win-label">赛事地图（可选）</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => setMapId("")}
+              className={`win-chip ${mapId === "" ? "win-chip-accent" : ""}`}
+              style={{ cursor: "pointer", color: mapId === "" ? "var(--win-accent)" : "var(--win-text-tertiary)" }}
+            >
+              未选择
+            </button>
+            {tags.maps.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setMapId(m.id)}
+                className={`win-chip ${mapId === m.id ? "win-chip-accent" : ""}`}
+                style={{ cursor: "pointer" }}
+              >
+                {m.name}
+              </button>
+            ))}
+          </div>
+          {tags.maps.length === 0 && (
+            <span style={{ fontSize: 12, color: "var(--win-text-tertiary)" }}>请先在标签维护中添加赛事地图</span>
           )}
         </div>
 

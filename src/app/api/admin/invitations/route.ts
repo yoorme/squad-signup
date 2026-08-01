@@ -33,12 +33,16 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   // 防止重复，最多重试 5 次
   let code = "";
+  let foundUnique = false;
   for (let i = 0; i < 5; i++) {
     code = generateInvitationCode(8);
     const exists = await prisma.invitationCode.findUnique({ where: { code } });
-    if (!exists) break;
+    if (!exists) {
+      foundUnique = true;
+      break;
+    }
   }
-  if (!code) return fail("生成邀请码失败，请重试", 500);
+  if (!foundUnique) return fail("生成邀请码失败，请重试", 500);
 
   const created = await prisma.invitationCode.create({
     data: { code, maxUses, createdById: user.id },

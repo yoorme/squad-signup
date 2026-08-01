@@ -125,6 +125,15 @@ model SquadNature {
   squads    Squad[]
 }
 
+// 赛事地图（攀升 / 烬区 / 风暴眼 / 临界点 / 堑壕战 / 断层 / 断轨）
+model EventMap {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  sortOrder Int      @default(0)
+  disabled  Boolean  @default(false)
+  events    Event[]
+}
+
 // ============ 邀请码 ============
 
 model InvitationCode {
@@ -188,6 +197,7 @@ model Event {
   eventTime     DateTime
   natureId      String
   nameId        String
+  mapId         String? // 赛事地图（可选，未选择时为 null）
   requiredCount Int
   format        EventFormat? // 赛制：BO3 / BO5 / R2，null 表示未知（不展示）
   status        EventStatus @default(UPCOMING)
@@ -196,6 +206,7 @@ model Event {
   createdBy     User        @relation(fields: [createdById], references: [id])
   nature        EventNature @relation(fields: [natureId], references: [id])
   name          EventName   @relation(fields: [nameId], references: [id])
+  map           EventMap?   @relation(fields: [mapId], references: [id])
   squads        Squad[]
   registrations Registration[]
   reads         EventRead[]

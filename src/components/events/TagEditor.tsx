@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 
-type TagType = "nature" | "name" | "squadNature";
+type TagType = "nature" | "name" | "squadNature" | "map";
 
 interface TagItem {
   id: string;
@@ -14,7 +14,9 @@ interface TagItem {
 
 interface Props {
   type: TagType;
+  // selectedId 为 string；map 类型下传空字符串表示"未选择"
   selectedId: string;
+  // 选中某标签时回调其 id；map 类型下回调空字符串表示清空地图
   onSelect: (id: string) => void;
 }
 
@@ -22,6 +24,7 @@ const TYPE_LABEL: Record<TagType, string> = {
   nature: "赛事性质",
   name: "赛事名称",
   squadNature: "分队性质",
+  map: "赛事地图",
 };
 
 export function TagEditor({ type, selectedId, onSelect }: Props) {
@@ -178,6 +181,23 @@ export function TagEditor({ type, selectedId, onSelect }: Props) {
 
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      {/* 地图类型允许"未选择"（清空地图）：用空字符串表示未选择状态 */}
+      {type === "map" && (
+        <span
+          className={`win-chip ${selectedId === "" ? "win-chip-accent" : ""}`}
+          style={{
+            cursor: "pointer",
+            fontSize: 12,
+            color: selectedId === "" ? "var(--win-accent)" : "var(--win-text-tertiary)",
+            userSelect: "none",
+          }}
+          onClick={() => onSelect("")}
+          title="不指定地图"
+        >
+          未选择
+        </span>
+      )}
+
       {tags.map((t) => {
         const active = t.id === selectedId;
         return (
