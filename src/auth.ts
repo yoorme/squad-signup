@@ -44,15 +44,24 @@ export const authConfig: NextAuthConfig = {
     }),
   ],
   callbacks: {
-    async jwt({ token, user, trigger, session }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.id = (user as any).id;
         token.role = (user as any).role;
         token.nickname = (user as any).nickname;
       }
-      // 修改昵称后，前端调用 update() 触发此分支，刷新 token 中的用户名
-      if (trigger === "update" && session?.name) {
-        token.name = session.name as string;
+      // 前端调用 update() 时（如修改昵称/资料后），不信任客户端传入的
+      // session 数据，统一从数据库重读，防止伪造 token 中的身份信息，
+      // 同时保证 nickname/role 变更后 token 同步刷新
+      if (trigger === "update" && token.id) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: token.id as string },
+        });
+        if (dbUser) {
+          token.name = dbUser.username;
+          token.nickname = dbUser.nickname;
+          token.role = dbUser.role;
+        }
       }
       return token;
     },

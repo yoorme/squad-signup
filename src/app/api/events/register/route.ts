@@ -9,8 +9,9 @@ import { ok, fail, withErrorHandler } from "@/lib/api";
 //
 // 并发策略：
 // - 不使用长事务
-// - 依赖复合唯一约束 [eventId, userId, status] 防止重复报名
-// - 容量校验使用原子 count，最后由业务层 + 约束兜底
+// - "同一用户同一赛事最多一条有效报名"由部分唯一索引兜底（见 schema 注释）
+// - 容量复查按 createdAt 升序保留前 N 名，仅降级超出名额者，
+//   避免并发抢名额时所有请求"集体自我降级"导致分队留空
 // - 满员时自动回退为替补
 export const POST = withErrorHandler(async (req: NextRequest) => {
   const user = await requireUser();
@@ -26,9 +27,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   if (!event) return fail("赛事不存在", 404);
   if (event.status === "ARCHIVED") return fail("赛事已结束", 400);
 
-  // 2. 校验是否已报名
-  const existing = await prisma.registration.findUnique({
-    where: { eventId_userId_status: { eventId, userId: user.id, status: "REGISTERED" } },
+  // 2. 校验是否已有有效报名
+  const existing = await prisma.registration.findFirst({
+    where: { eventId, userId: user.id, status: "REGISTERED" },
   });
   if (existing) return fail("您已报名，请先取消再重新选择");
 
@@ -54,50 +55,83 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     }
   }
 
-  // 4. 创建报名记录
-  // 并发兜底：复合唯一约束 [eventId, userId, status] 会拒绝第二个并发报名
+  const newIsSubstitute = asSubstitute || !targetSquadId;
+
+  // 4. 写入报名记录：有取消记录则复活，否则新建
+  // 并发兜底：部分唯一索引会拒绝第二个并发的有效报名（P2002）
   try {
-    const reg = await prisma.registration.create({
-      data: {
-        eventId,
-        userId: user.id,
-        squadId: targetSquadId,
-        isSubstitute: asSubstitute || !targetSquadId,
-        status: "REGISTERED",
-      },
+    const cancelled = await prisma.registration.findFirst({
+      where: { eventId, userId: user.id, status: "CANCELLED" },
+      orderBy: { createdAt: "desc" },
     });
 
-    // 5. 创建后再次校验容量（防止并发时多个请求都通过了第3步的检查）
-    // 若发现超额，将此报名降级为替补
-    if (targetSquadId) {
-      const finalCount = await prisma.registration.count({
-        where: { squadId: targetSquadId, status: "REGISTERED" },
+    let registrationId: string;
+    if (cancelled) {
+      // 复活取消记录（条件更新：被并发抢先复活/变动时 count=0）
+      const revived = await prisma.registration.updateMany({
+        where: { id: cancelled.id, status: "CANCELLED" },
+        data: {
+          squadId: targetSquadId,
+          isSubstitute: newIsSubstitute,
+          status: "REGISTERED",
+          createdAt: new Date(), // 重新排队，以复活时间参与容量排序
+        },
       });
+      if (revived.count === 0) {
+        return fail("操作冲突，请刷新后重试", 409);
+      }
+      registrationId = cancelled.id;
+    } else {
+      const reg = await prisma.registration.create({
+        data: {
+          eventId,
+          userId: user.id,
+          squadId: targetSquadId,
+          isSubstitute: newIsSubstitute,
+          status: "REGISTERED",
+        },
+      });
+      registrationId = reg.id;
+    }
+
+    // 5. 写入后复查容量（防止并发时多个请求都通过了第3步的检查）
+    // 按 createdAt 升序保留前 capacity 名，仅将超出名额的新报名者降级为替补，
+    // 保证先到者不被误伤、分队不留空位
+    if (targetSquadId) {
       const squad = await prisma.squad.findUnique({ where: { id: targetSquadId } });
-      if (squad && finalCount > squad.capacity) {
-        // 超额：降级为替补
-        await prisma.registration.update({
-          where: { id: reg.id },
-          data: { squadId: null, isSubstitute: true },
+      if (squad) {
+        const activeRegs = await prisma.registration.findMany({
+          where: { squadId: targetSquadId, status: "REGISTERED" },
+          orderBy: { createdAt: "asc" },
+          select: { id: true },
         });
-        return ok({
-          success: false,
-          fellbackToSubstitute: true,
-          message: "该分队已被其他队员抢先报名，已自动加入替补",
-          registrationId: reg.id,
-        });
+        if (activeRegs.length > squad.capacity) {
+          const overflowIds = activeRegs.slice(squad.capacity).map((r) => r.id);
+          await prisma.registration.updateMany({
+            where: { id: { in: overflowIds } },
+            data: { squadId: null, isSubstitute: true },
+          });
+          if (overflowIds.includes(registrationId)) {
+            return ok({
+              success: false,
+              fellbackToSubstitute: true,
+              message: "该分队已被其他队员抢先报名，已自动加入替补",
+              registrationId,
+            });
+          }
+        }
       }
     }
 
     return ok({
       success: !fellbackToSubstitute,
-      registrationId: reg.id,
-      isSubstitute: asSubstitute || !targetSquadId,
+      registrationId,
+      isSubstitute: newIsSubstitute,
       fellbackToSubstitute,
       message: fellbackToSubstitute ? "该分队已满，已自动加入替补" : undefined,
     });
   } catch (e: any) {
-    // 唯一约束冲突 = 并发重复报名
+    // 唯一索引冲突 = 并发重复报名
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       return fail("您已报名，请先取消再重新选择");
     }
@@ -105,9 +139,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   }
 });
 
-// 取消报名
+// 取消报名（软删除：status → CANCELLED，保留记录便于审计与再次报名时复活）
 // query: ?registrationId=xxx
-// 使用条件删除：仅当 status 仍为 REGISTERED 时才删除
+// 使用条件更新：仅当 status 仍为 REGISTERED 时才取消
 // 这样即使管理员同时移动该队员，也只有一个操作会成功
 export const DELETE = withErrorHandler(async (req: NextRequest) => {
   const user = await requireUser();
@@ -125,14 +159,14 @@ export const DELETE = withErrorHandler(async (req: NextRequest) => {
   const event = await prisma.event.findUnique({ where: { id: reg.eventId } });
   if (event?.status === "ARCHIVED") return fail("赛事已结束，无法取消");
 
-  // 条件删除：仅当 status 仍为 REGISTERED 时才删除
-  // 若管理员在此期间移动了该队员（updateMany 不会改变 status），删除仍会成功
-  // 若已被其他流程取消/删除，count=0，提示用户
-  const deleted = await prisma.registration.deleteMany({
+  // 条件更新：仅当 status 仍为 REGISTERED 时才取消
+  // 若已被其他流程取消，count=0，提示用户
+  const updated = await prisma.registration.updateMany({
     where: { id, status: "REGISTERED" },
+    data: { status: "CANCELLED" },
   });
-  if (deleted.count === 0) {
-    return fail("该报名记录已被取消或已被管理员调整", 409);
+  if (updated.count === 0) {
+    return fail("该报名记录已被取消", 409);
   }
 
   return ok({ success: true });

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
+import { buildEventTitle } from "@/lib/constants";
 
 // 删除赛事（管理员）
 export const DELETE = withErrorHandler(async (req: NextRequest) => {
@@ -108,8 +109,12 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
           }
           // 确定当前对手：传了新值用新值，否则用已有值
           const currentOpponent = opponent !== undefined ? (opponent ? opponent.trim() : "") : (ev.opponent ?? "");
-          const timeStr = ev.eventTime.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-          evData.title = [displayName, nature.name, currentOpponent, timeStr].filter(Boolean).join(" - ");
+          evData.title = buildEventTitle({
+            displayName,
+            natureName: nature.name,
+            opponent: currentOpponent,
+            eventTime: ev.eventTime,
+          });
         }
       }
     }

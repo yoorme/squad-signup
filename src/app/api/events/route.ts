@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser, requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
-import { calculateSquadCount, isValidSquadCount } from "@/lib/constants";
+import { calculateSquadCount, isValidSquadCount, buildEventTitle } from "@/lib/constants";
 
 // 事件详情查询的完整 payload 类型（含 squads/registrations/user 关联）
 type EventDetailPayload = Prisma.EventGetPayload<{
@@ -329,8 +329,12 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   // 主体字 title：名称 - 性质 - 对手 - 时间（无名称时省略名称段）
   const displayName = name ? name.name : useCustomName ? trimmedCustom : "";
-  const timeStr = eventDate.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-  const title = [displayName, nature.name, trimmedOpponent, timeStr].filter(Boolean).join(" - ");
+  const title = buildEventTitle({
+    displayName,
+    natureName: nature.name,
+    opponent: trimmedOpponent,
+    eventTime: eventDate,
+  });
 
   const event = await prisma.$transaction(async (tx) => {
     const ev = await tx.event.create({

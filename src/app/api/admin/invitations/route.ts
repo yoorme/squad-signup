@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
-import { generateInvitationCode } from "@/lib/constants";
+import { generateInvitationCode } from "@/lib/invitation-code";
 
 // 邀请码管理 - 获取列表
 export const GET = withErrorHandler(async () => {

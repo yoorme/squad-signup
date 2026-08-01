@@ -258,7 +258,10 @@ model Registration {
   event        Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   squad        Squad?    @relation(fields: [squadId], references: [id], onDelete: SetNull)
-  @@unique([eventId, userId, status])
+
+  // 取消报名为软删除（status=CANCELLED，保留记录便于审计与重复报名复活）。
+  // "同一用户同一赛事最多一条有效报名"由部分唯一索引保证（见 migration
+  // 20260802000000_registration_soft_delete），Prisma 无法声明部分索引故此处无 @@unique。
 }
 
 enum RegStatus {
