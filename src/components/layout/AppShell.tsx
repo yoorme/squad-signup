@@ -23,17 +23,6 @@ const defaultNavItems: NavItem[] = [
     ),
   },
   {
-    href: "/members",
-    label: "队员",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
     href: "/events",
     label: "赛事",
     icon: (
@@ -208,11 +197,45 @@ export function AppShell({ children, navItems = defaultNavItems, showAdmin }: Ap
         })}
       </nav>
 
+      {/* 队员入口：浮动在内容区左下角（导航栏右侧），不在主导航列表中 */}
+      {!pathname?.startsWith("/members") && (
+        <Link
+          href="/members"
+          id="members-fab"
+          className="acrylic-strong"
+          style={{
+            position: "fixed",
+            bottom: 76,
+            left: 16,
+            zIndex: 30,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "8px 14px",
+            borderRadius: 999,
+            textDecoration: "none",
+            color: "var(--win-text-secondary)",
+            fontSize: 13,
+            fontWeight: 500,
+            border: "1px solid var(--win-border)",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span>队员</span>
+        </Link>
+      )}
+
       {/* 响应式切换：>=768px 显示左侧栏，<768px 显示底部栏 */}
       <style>{`
         @media (min-width: 768px) {
           #desktop-nav { display: flex !important; }
           #main-content { padding-bottom: 16px !important; }
+          #members-fab { left: 256px !important; bottom: 16px !important; }
         }
         @media (max-width: 767px) {
           #mobile-nav { display: flex !important; }
