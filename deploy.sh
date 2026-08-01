@@ -55,6 +55,9 @@ INITIAL_ADMIN_PASSWORD=admin123456
 
 # 站点 URL（用 IP 访问）
 NEXTAUTH_URL=http://121.196.195.27:3000
+
+# 信任 Host（用 IP 访问必须为 true；用 HTTPS 域名可设为 false）
+AUTH_TRUST_HOST=true
 EOF
   echo ".env 已创建"
 fi
