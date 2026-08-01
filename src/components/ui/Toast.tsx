@@ -37,9 +37,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={{ toast }}>
       {children}
       <div
+        id="toast-container"
         style={{
           position: "fixed",
-          bottom: 24,
+          bottom: 76,
           left: "50%",
           transform: "translateX(-50%)",
           zIndex: 100,
@@ -71,6 +72,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         @keyframes toast-in {
           from { opacity: 0; transform: translateY(10px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        @media (min-width: 768px) {
+          #toast-container { bottom: 24px !important; }
         }
       `}</style>
     </ToastContext.Provider>

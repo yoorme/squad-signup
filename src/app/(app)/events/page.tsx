@@ -24,7 +24,8 @@ interface EventListItem {
   requiredCount: number;
   format: "BO3" | "BO5" | "R2" | null;
   nature: Nature;
-  name: Name;
+  name: Name | null;
+  customName: string | null;
   map: EventMap | null;
   squads: Squad[];
   totalRegistered: number;
@@ -131,7 +132,9 @@ function EventCard({ event }: { event: EventListItem }) {
             >
               {event.nature.name}
             </span>
-            <span className="win-chip" style={{ fontSize: 11 }}>{event.name.name}</span>
+            {(event.name || event.customName) && (
+              <span className="win-chip" style={{ fontSize: 11 }}>{event.name?.name ?? event.customName}</span>
+            )}
             {event.map && (
               <span className="win-chip" style={{ fontSize: 11 }}>{event.map.name}</span>
             )}

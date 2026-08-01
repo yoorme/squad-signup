@@ -168,6 +168,7 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       format: e.format,
       nature: e.nature,
       name: e.name,
+      customName: e.customName,
       map: e.map,
       createdAt: e.createdAt,
       isRead: myReadSet.has(e.id),
@@ -208,6 +209,7 @@ function serializeEventDetail(
     format: e.format,
     nature: e.nature,
     name: e.name,
+    customName: e.customName,
     map: e.map,
     createdAt: e.createdAt,
     version,
@@ -244,17 +246,18 @@ function serializeEventDetail(
 export const POST = withErrorHandler(async (req: NextRequest) => {
   const user = await requireAdmin();
   const body = await req.json();
-  const { eventTime, natureId, nameId, mapId, requiredCount, squadNatures, format } = body as {
+  const { eventTime, natureId, nameId, customName, mapId, requiredCount, squadNatures, format } = body as {
     eventTime: string;
     natureId: string;
-    nameId: string;
+    nameId?: string | null; // 赛事名称（可选）：null/空 = "未知"（不展示名称）；非空 = 关联标签
+    customName?: string | null; // "其他"时管理员输入的自定义临时名称（最少 1 字符）
     mapId?: string | null; // 赛事地图（可选，null/undefined 表示未选择）
     requiredCount: number;
     squadNatures: string[]; // 每支队伍的性质 ID 列表
     format?: "BO3" | "BO5" | "R2" | null; // 赛制，null/undefined 表示未知
   };
 
-  if (!eventTime || !natureId || !nameId || !requiredCount) {
+  if (!eventTime || !natureId || !requiredCount) {
     return fail("请填写完整信息");
   }
   const required = Number(requiredCount);
@@ -272,15 +275,27 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     return fail("分队数量不满足规则");
   }
 
+  // 赛事名称三种模式：
+  //   - 关联标签：nameId 非空，校验标签存在且未禁用
+  //   - 自定义"其他"：nameId 为空但 customName 非空（最少 1 字符），作为临时名称
+  //   - "未知"：nameId 与 customName 均为空，不展示名称（主体字仅显示赛事性质）
+  const trimmedCustom = customName ? customName.trim() : "";
+  const useCustomName = !nameId && trimmedCustom.length > 0;
+  if (customName && trimmedCustom.length === 0) {
+    return fail("自定义名称不能为空白");
+  }
+
   // 校验标签存在且未被禁用
-  const [nature, name] = await Promise.all([
-    prisma.eventNature.findUnique({ where: { id: natureId } }),
-    prisma.eventName.findUnique({ where: { id: nameId } }),
-  ]);
+  const nature = await prisma.eventNature.findUnique({ where: { id: natureId } });
   if (!nature) return fail("赛事性质不存在");
   if (nature.disabled) return fail("赛事性质已被禁用，请选择其他标签");
-  if (!name) return fail("赛事名称不存在");
-  if (name.disabled) return fail("赛事名称已被禁用，请选择其他标签");
+
+  let name: { id: string; name: string; disabled: boolean } | null = null;
+  if (nameId) {
+    name = await prisma.eventName.findUnique({ where: { id: nameId } });
+    if (!name) return fail("赛事名称不存在");
+    if (name.disabled) return fail("赛事名称已被禁用，请选择其他标签");
+  }
 
   // 校验地图存在且未被禁用（可选，未传则跳过）
   let mapRecord = null;
@@ -305,7 +320,12 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   const eventDate = new Date(eventTime);
   if (isNaN(eventDate.getTime())) return fail("时间格式错误");
 
-  const title = `${name.name} - ${nature.name} - ${eventDate.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
+  // 主体字 title：未知模式仅显示赛事性质，否则显示「名称 - 性质」
+  const displayName = name ? name.name : useCustomName ? trimmedCustom : "";
+  const timeStr = eventDate.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const title = displayName
+    ? `${displayName} - ${nature.name} - ${timeStr}`
+    : `${nature.name} - ${timeStr}`;
 
   const event = await prisma.$transaction(async (tx) => {
     const ev = await tx.event.create({
@@ -313,7 +333,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         title,
         eventTime: eventDate,
         natureId,
-        nameId,
+        nameId: nameId || null,
+        customName: useCustomName ? trimmedCustom : null,
         mapId: mapRecord?.id ?? null,
         requiredCount: required,
         format: formatValue,

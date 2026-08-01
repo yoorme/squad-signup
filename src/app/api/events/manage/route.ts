@@ -22,7 +22,10 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
 
   const status = body?.status as "UPCOMING" | "ARCHIVED" | undefined;
   const natureId = body?.natureId as string | undefined;
-  const nameId = body?.nameId as string | undefined;
+  // nameId: null = 清空名称（"未知"/"其他"）；undefined = 不修改；string = 关联标签
+  const nameId = body?.nameId as string | null | undefined;
+  // customName: null/空 = 无自定义；string = "其他"临时名称（最少 1 字符）；undefined = 不修改
+  const customName = body?.customName as string | null | undefined;
   // mapId: null = 清空地图；undefined = 不修改；string = 切换到指定地图
   const mapId = body?.mapId as string | null | undefined;
   const format = body?.format as "BO3" | "BO5" | "R2" | null | undefined;
@@ -34,6 +37,10 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   }
   if (format !== undefined && format !== null && !["BO3", "BO5", "R2"].includes(format)) {
     return fail("无效赛制");
+  }
+  // 自定义名称校验：传了 customName 且非 null 时必须非空白
+  if (customName !== undefined && customName !== null && customName.trim().length === 0) {
+    return fail("自定义名称不能为空白");
   }
 
   // 校验标签存在且未被禁用
@@ -70,18 +77,36 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     const evData: any = {};
     if (status) evData.status = status;
     if (natureId) evData.natureId = natureId;
-    if (nameId) evData.nameId = nameId;
+    if (nameId !== undefined) evData.nameId = nameId || null; // null = 清空名称
+    if (customName !== undefined) evData.customName = customName ? customName.trim() : null;
     if (mapId !== undefined) evData.mapId = mapId; // null = 清空，string = 切换
     if (format !== undefined) evData.format = format;
 
-    // 当 name 或 nature 变化时，同步重生成 title（任一变化都需重生成，避免标题残留旧名称）
-    if (nameId || natureId) {
+    // 当 name / customName / nature 任一变化时，同步重生成 title
+    const titleDirty = nameId !== undefined || customName !== undefined || natureId !== undefined;
+    if (titleDirty) {
       const ev = await tx.event.findUnique({ where: { id }, include: { nature: true, name: true } });
       if (ev) {
-        const name = nameId ? await tx.eventName.findUnique({ where: { id: nameId } }) : ev.name;
         const nature = natureId ? await tx.eventNature.findUnique({ where: { id: natureId } }) : ev.nature;
-        if (name && nature) {
-          evData.title = `${name.name} - ${nature.name} - ${ev.eventTime.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
+        if (nature) {
+          // 确定显示名称：关联标签 > 自定义名称 > 未知（空）
+          let displayName = "";
+          if (nameId) {
+            const nameRec = await tx.eventName.findUnique({ where: { id: nameId } });
+            displayName = nameRec?.name ?? "";
+          } else if (nameId === null) {
+            // 显式清空：用 customName 或未知
+            displayName = customName ? customName.trim() : "";
+          } else if (customName !== undefined) {
+            // nameId 未变，仅 customName 变化
+            displayName = customName ? customName.trim() : ev.name?.name ?? "";
+          } else {
+            displayName = ev.name?.name ?? ev.customName ?? "";
+          }
+          const timeStr = ev.eventTime.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+          evData.title = displayName
+            ? `${displayName} - ${nature.name} - ${timeStr}`
+            : `${nature.name} - ${timeStr}`;
         }
       }
     }

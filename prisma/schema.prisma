@@ -196,7 +196,8 @@ model Event {
   title         String // 冗余字段，由 name + nature + 时间组合生成，便于显示
   eventTime     DateTime
   natureId      String
-  nameId        String
+  nameId        String? // 赛事名称（可选：null 表示"未知"，不展示名称）
+  customName    String? // 自定义临时名称（"其他"时管理员输入，最少 1 字符）
   mapId         String? // 赛事地图（可选，未选择时为 null）
   requiredCount Int
   format        EventFormat? // 赛制：BO3 / BO5 / R2，null 表示未知（不展示）
@@ -205,7 +206,7 @@ model Event {
   createdById   String
   createdBy     User        @relation(fields: [createdById], references: [id])
   nature        EventNature @relation(fields: [natureId], references: [id])
-  name          EventName   @relation(fields: [nameId], references: [id])
+  name          EventName?  @relation(fields: [nameId], references: [id])
   map           EventMap?   @relation(fields: [mapId], references: [id])
   squads        Squad[]
   registrations Registration[]

@@ -24,7 +24,10 @@ export default function NewEventPage() {
 
   const [eventTime, setEventTime] = useState("");
   const [natureId, setNatureId] = useState("");
+  // 赛事名称三种模式：tag=关联标签 / other=自定义临时名称 / unknown=不展示名称
+  const [nameMode, setNameMode] = useState<"tag" | "other" | "unknown">("unknown");
   const [nameId, setNameId] = useState("");
+  const [customName, setCustomName] = useState("");
   const [mapId, setMapId] = useState("");
   const [requiredCount, setRequiredCount] = useState("20");
   const [format, setFormat] = useState<"BO3" | "BO5" | "R2" | null>(null);
@@ -37,7 +40,10 @@ export default function NewEventPage() {
     if (data.ok) {
       setTags(data.data);
       if (data.data.natures.length > 0) setNatureId(data.data.natures[0].id);
-      if (data.data.names.length > 0) setNameId(data.data.names[0].id);
+      if (data.data.names.length > 0) {
+        setNameId(data.data.names[0].id);
+        setNameMode("tag");
+      }
     }
     setLoading(false);
   };
@@ -64,8 +70,17 @@ export default function NewEventPage() {
       toast("请选择赛事时间", "warning");
       return;
     }
-    if (!natureId || !nameId) {
-      toast("请选择赛事性质和名称", "warning");
+    if (!natureId) {
+      toast("请选择赛事性质", "warning");
+      return;
+    }
+    // 赛事名称校验：tag 模式需选标签；other 模式需输入至少 1 字符；unknown 无需名称
+    if (nameMode === "tag" && !nameId) {
+      toast("请选择赛事名称", "warning");
+      return;
+    }
+    if (nameMode === "other" && customName.trim().length === 0) {
+      toast("请输入自定义名称（至少 1 个字符）", "warning");
       return;
     }
     const requiredNum = Number(requiredCount);
@@ -84,7 +99,8 @@ export default function NewEventPage() {
       body: JSON.stringify({
         eventTime,
         natureId,
-        nameId,
+        nameId: nameMode === "tag" ? nameId : null,
+        customName: nameMode === "other" ? customName.trim() : null,
         mapId: mapId || null,
         requiredCount: requiredNum,
         format,
@@ -150,20 +166,53 @@ export default function NewEventPage() {
         {/* 赛事名称 */}
         <div>
           <label className="win-label">赛事名称</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {/* 未知：不展示赛事名称，主体字仅显示赛事性质 */}
+            <button
+              type="button"
+              onClick={() => setNameMode("unknown")}
+              className={`win-chip ${nameMode === "unknown" ? "win-chip-accent" : ""}`}
+              style={{ cursor: "pointer", color: nameMode === "unknown" ? "var(--win-accent)" : "var(--win-text-tertiary)" }}
+            >
+              未知
+            </button>
+            {/* 其他：管理员输入自定义临时名称（最少 1 字符） */}
+            <button
+              type="button"
+              onClick={() => setNameMode("other")}
+              className={`win-chip ${nameMode === "other" ? "win-chip-accent" : ""}`}
+              style={{ cursor: "pointer", color: nameMode === "other" ? "var(--win-accent)" : "var(--win-text-tertiary)" }}
+            >
+              其他
+            </button>
             {tags.names.map((n) => (
               <button
                 key={n.id}
-                onClick={() => setNameId(n.id)}
-                className={`win-chip ${nameId === n.id ? "win-chip-accent" : ""}`}
+                type="button"
+                onClick={() => { setNameId(n.id); setNameMode("tag"); }}
+                className={`win-chip ${nameMode === "tag" && nameId === n.id ? "win-chip-accent" : ""}`}
                 style={{ cursor: "pointer" }}
               >
                 {n.name}
               </button>
             ))}
           </div>
-          {tags.names.length === 0 && (
-            <span style={{ fontSize: 12, color: "var(--win-text-tertiary)" }}>请先在标签维护中添加赛事名称</span>
+          {/* 其他模式：输入框，最少 1 字符，作为该赛事的临时名称 */}
+          {nameMode === "other" && (
+            <input
+              type="text"
+              className="win-input"
+              style={{ marginTop: 8, maxWidth: 320 }}
+              value={customName}
+              onChange={(e) => setCustomName(e.target.value)}
+              placeholder="输入自定义赛事名称（至少 1 个字符）"
+              autoFocus
+            />
+          )}
+          {nameMode === "unknown" && (
+            <span style={{ fontSize: 12, color: "var(--win-text-tertiary)", marginTop: 6, display: "block" }}>
+              不展示赛事名称，主体字仅显示赛事性质
+            </span>
           )}
         </div>
 
@@ -206,9 +255,6 @@ export default function NewEventPage() {
             onChange={(e) => setRequiredCount(e.target.value)}
             style={{ maxWidth: 200 }}
           />
-          <p style={{ fontSize: 12, color: "var(--win-text-tertiary)", marginTop: 6 }}>
-            系统自动计算分队数量：{teamCount} 队 × 4 人 = {teamCount * 4} 空位（差值 {teamCount * 4 - (Number(requiredCount) || 0)} &lt; 4）
-          </p>
         </div>
 
         {/* 赛制 */}
@@ -235,9 +281,6 @@ export default function NewEventPage() {
               </button>
             ))}
           </div>
-          <p style={{ fontSize: 12, color: "var(--win-text-tertiary)", marginTop: 6 }}>
-            选择「未知」则不展示赛制标签
-          </p>
         </div>
 
         {/* 分队性质设置 */}
@@ -266,9 +309,6 @@ export default function NewEventPage() {
               </div>
             ))}
           </div>
-          <p style={{ fontSize: 12, color: "var(--win-text-tertiary)", marginTop: 6 }}>
-            分队性质可选：{tags.squadNatures.map((n) => n.name).join("、")}
-          </p>
         </div>
 
         {/* 操作 */}

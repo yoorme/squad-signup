@@ -23,7 +23,8 @@ interface EventItem {
   requiredCount: number;
   format: "BO3" | "BO5" | "R2" | null;
   nature: { id: string; name: string };
-  name: { id: string; name: string };
+  name: { id: string; name: string } | null;
+  customName: string | null;
   map: { id: string; name: string } | null;
   squads: Squad[];
 }
@@ -85,7 +86,7 @@ export default function AdminEventsPage() {
   // 保存赛事标签/赛制/分队性质/地图
   const handleSaveEdit = async (
     ev: EventItem,
-    patch: { natureId?: string; nameId?: string; mapId?: string | null; format?: "BO3" | "BO5" | "R2" | null; squads?: { id: string; natureId: string }[] }
+    patch: { natureId?: string; nameId?: string | null; customName?: string | null; mapId?: string | null; format?: "BO3" | "BO5" | "R2" | null; squads?: { id: string; natureId: string }[] }
   ) => {
     const res = await fetch("/api/events/manage", {
       method: "PATCH",
@@ -186,27 +187,49 @@ function EventEditCard({
   onDelete: () => void;
 }) {
   const [natureId, setNatureId] = useState(ev.nature.id);
-  const [nameId, setNameId] = useState(ev.name.id);
+  // 赛事名称：tag=关联标签 / other=自定义临时名称 / unknown=不展示名称
+  const [nameMode, setNameMode] = useState<"tag" | "other" | "unknown">(
+    ev.name ? "tag" : ev.customName ? "other" : "unknown"
+  );
+  const [nameId, setNameId] = useState(ev.name?.id ?? "");
+  const [customName, setCustomName] = useState(ev.customName ?? "");
   const [mapId, setMapId] = useState(ev.map?.id ?? "");
   const [format, setFormat] = useState<"BO3" | "BO5" | "R2" | null>(ev.format);
   const [squadNatures, setSquadNatures] = useState<Record<string, string>>(
     Object.fromEntries(ev.squads.map((s) => [s.id, s.nature.id]))
   );
+  // 赛事名称标签列表（编辑时懒加载，供 tag 模式选择）
+  const [nameTags, setNameTags] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    if (!editing) return;
+    fetch("/api/admin/tags?type=name")
+      .then((r) => r.json())
+      .then((d) => { if (d.ok) setNameTags(d.data); });
+  }, [editing]);
 
   // 切换编辑对象时重置本地状态
   useEffect(() => {
     setNatureId(ev.nature.id);
-    setNameId(ev.name.id);
+    setNameMode(ev.name ? "tag" : ev.customName ? "other" : "unknown");
+    setNameId(ev.name?.id ?? "");
+    setCustomName(ev.customName ?? "");
     setMapId(ev.map?.id ?? "");
     setFormat(ev.format);
     setSquadNatures(Object.fromEntries(ev.squads.map((s) => [s.id, s.nature.id])));
-  }, [ev.id, ev.nature.id, ev.name.id, ev.map?.id, ev.format]);
+  }, [ev.id, ev.nature.id, ev.name?.id, ev.customName, ev.map?.id, ev.format]);
 
   const isArchived = ev.status === "ARCHIVED";
 
+  // 名称是否相对原始状态发生变化
+  const nameChanged =
+    (nameMode === "tag" ? nameId : ev.name?.id ?? "") !== (ev.name?.id ?? "") ||
+    (nameMode === "other" ? customName.trim() : ev.customName ?? "") !== (ev.customName ?? "") ||
+    (nameMode === "unknown" && (ev.name || ev.customName));
+
   const dirty =
     natureId !== ev.nature.id ||
-    nameId !== ev.name.id ||
+    nameChanged ||
     mapId !== (ev.map?.id ?? "") ||
     format !== ev.format ||
     ev.squads.some((s) => squadNatures[s.id] !== s.nature.id);
@@ -218,7 +241,9 @@ function EventEditCard({
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
             <span className="win-chip" style={{ fontSize: 11 }}>{ev.nature.name}</span>
-            <span className="win-chip" style={{ fontSize: 11 }}>{ev.name.name}</span>
+            {(ev.name || ev.customName) && (
+              <span className="win-chip" style={{ fontSize: 11 }}>{ev.name?.name ?? ev.customName}</span>
+            )}
             {ev.map && (
               <span className="win-chip" style={{ fontSize: 11 }}>{ev.map.name}</span>
             )}
@@ -266,7 +291,45 @@ function EventEditCard({
           </div>
           <div>
             <label className="win-label">赛事名称</label>
-            <TagEditor type="name" selectedId={nameId} onSelect={setNameId} />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <button
+                type="button"
+                onClick={() => setNameMode("unknown")}
+                className={`win-chip ${nameMode === "unknown" ? "win-chip-accent" : ""}`}
+                style={{ cursor: "pointer", fontSize: 12, color: nameMode === "unknown" ? "var(--win-accent)" : "var(--win-text-tertiary)" }}
+              >
+                未知
+              </button>
+              <button
+                type="button"
+                onClick={() => setNameMode("other")}
+                className={`win-chip ${nameMode === "other" ? "win-chip-accent" : ""}`}
+                style={{ cursor: "pointer", fontSize: 12, color: nameMode === "other" ? "var(--win-accent)" : "var(--win-text-tertiary)" }}
+              >
+                其他
+              </button>
+              {nameTags.map((n) => (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => { setNameId(n.id); setNameMode("tag"); }}
+                  className={`win-chip ${nameMode === "tag" && nameId === n.id ? "win-chip-accent" : ""}`}
+                  style={{ cursor: "pointer", fontSize: 12 }}
+                >
+                  {n.name}
+                </button>
+              ))}
+            </div>
+            {nameMode === "other" && (
+              <input
+                type="text"
+                className="win-input"
+                style={{ marginTop: 8, maxWidth: 320 }}
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                placeholder="输入自定义赛事名称（至少 1 个字符）"
+              />
+            )}
           </div>
           <div>
             <label className="win-label">赛事地图（可选，点击「未知」清空）</label>
@@ -321,7 +384,11 @@ function EventEditCard({
               onClick={() => {
                 const patch: any = {};
                 if (natureId !== ev.nature.id) patch.natureId = natureId;
-                if (nameId !== ev.name.id) patch.nameId = nameId;
+                // 赛事名称：按模式发送 nameId（null=未知/其他）+ customName（其他时为输入值）
+                if (nameChanged) {
+                  patch.nameId = nameMode === "tag" ? nameId : null;
+                  patch.customName = nameMode === "other" ? customName.trim() : null;
+                }
                 if (mapId !== (ev.map?.id ?? "")) patch.mapId = mapId || null;
                 if (format !== ev.format) patch.format = format;
                 const changedSquads = ev.squads

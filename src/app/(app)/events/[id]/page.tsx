@@ -34,7 +34,8 @@ interface EventDetail {
   requiredCount: number;
   format: "BO3" | "BO5" | "R2" | null;
   nature: { id: string; name: string };
-  name: { id: string; name: string };
+  name: { id: string; name: string } | null;
+  customName: string | null;
   map: { id: string; name: string } | null;
   squads: Squad[];
   substitutes: Member[];
@@ -198,7 +199,9 @@ export default function EventDetailPage() {
           <div style={{ flex: 1, minWidth: 240 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
               <span className="win-chip" style={{ fontSize: 11, borderColor: "var(--win-border-strong)" }}>{event.nature.name}</span>
-              <span className="win-chip" style={{ fontSize: 11 }}>{event.name.name}</span>
+              {(event.name || event.customName) && (
+                <span className="win-chip" style={{ fontSize: 11 }}>{event.name?.name ?? event.customName}</span>
+              )}
               {event.map && (
                 <span className="win-chip" style={{ fontSize: 11 }}>{event.map.name}</span>
               )}
