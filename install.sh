@@ -216,8 +216,9 @@ configure_env() {
   local env_file="$INSTALL_DIR/.env"
   # 检查 .env 是否有效：存在且 DATABASE_URL 非空（空值会导致 prisma migrate 报晦涩错误）
   if [[ -f "$env_file" ]]; then
+    # 注意：grep 无匹配返回 1，pipefail 下会触发 set -e 退出，用 || true 兜底
     local existing_db
-    existing_db=$(grep '^DATABASE_URL=' "$env_file" 2>/dev/null | sed -E "s/^DATABASE_URL=//; s/^['\"]//; s/['\"]$//")
+    existing_db=$(grep '^DATABASE_URL=' "$env_file" 2>/dev/null | sed -E "s/^DATABASE_URL=//; s/^['\"]//; s/['\"]$//" || true)
     if [[ -n "$existing_db" ]]; then
       ok ".env 已存在，保留配置"
       # 加载到当前环境，供后续构建/启动使用
@@ -287,11 +288,12 @@ EOF
 # 保存部署参数（端口/分支），更新时复用
 save_deploy_conf() {
   local conf="$INSTALL_DIR/.deploy.conf"
-  cat > "$conf" <<EOF
-PORT="${PORT:-$DEFAULT_PORT}"
-BRANCH="$BRANCH"
-INSTALL_DIR="$INSTALL_DIR"
-EOF
+  # 用单引号转义写入（与 .env 一致），防止值含 $/" 等字符时 source 报错
+  {
+    echo "PORT=$(env_escape "${PORT:-$DEFAULT_PORT}")"
+    echo "BRANCH=$(env_escape "$BRANCH")"
+    echo "INSTALL_DIR=$(env_escape "$INSTALL_DIR")"
+  } > "$conf"
   chmod 600 "$conf"
   if [[ -n "$SYSTEM_CONF" ]]; then
     cp "$conf" "$SYSTEM_CONF" 2>/dev/null || true
@@ -339,6 +341,14 @@ setup_systemd() {
   local user; user=$(run_user)
   local env_file="$INSTALL_DIR/.env"
 
+  # WorkingDirectory 必须是绝对路径（systemd 要求）
+  local work_dir
+  if [[ "$INSTALL_DIR" = /* ]]; then
+    work_dir="$INSTALL_DIR"
+  else
+    work_dir=$(cd "$INSTALL_DIR" 2>/dev/null && pwd) || work_dir="$INSTALL_DIR"
+  fi
+
   log "配置 systemd 服务..."
   cat > /etc/systemd/system/squad-signup.service <<EOF
 [Unit]
@@ -347,7 +357,7 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=${INSTALL_DIR}
+WorkingDirectory=${work_dir}
 EnvironmentFile=${env_file}
 Environment=NODE_ENV=production
 Environment=PORT=${port}
@@ -495,6 +505,17 @@ do_update() {
 
 do_uninstall() {
   log "${C_BOLD}卸载 squad-signup${C_RESET}"
+  # 安全校验：防止 INSTALL_DIR 异常（如 /、/opt、空串）导致 rm -rf 灾难
+  safe_rm_install_dir() {
+    [[ -n "$INSTALL_DIR" ]] || { warn "INSTALL_DIR 为空，跳过删除"; return 0; }
+    [[ "$INSTALL_DIR" != "/" ]] || { warn "INSTALL_DIR 为 /，拒绝删除"; return 0; }
+    # 必须含 squad-signup 标识，或目录内有 package.json/.git 特征文件
+    if [[ "$INSTALL_DIR" != *squad-signup* ]] && [[ ! -f "$INSTALL_DIR/package.json" ]] && [[ ! -d "$INSTALL_DIR/.git" ]]; then
+      warn "$INSTALL_DIR 不像安装目录（无 package.json/.git 且路径不含 squad-signup），跳过删除"
+      return 0
+    fi
+    rm -rf "$INSTALL_DIR"
+  }
   if has_systemd; then
     systemctl stop squad-signup 2>/dev/null || true
     systemctl disable squad-signup 2>/dev/null || true
@@ -511,21 +532,30 @@ do_uninstall() {
         kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
         sleep 1
         kill -9 "$pid" 2>/dev/null || true
+        kill -9 -- -"$pid" 2>/dev/null || true
       fi
       rm -f "$INSTALL_DIR/.pid"
     fi
   fi
   if is_interactive; then
     if confirm "是否删除代码与数据目录 $INSTALL_DIR？" n; then
-      rm -rf "$INSTALL_DIR"
-      ok "已删除 $INSTALL_DIR"
+      safe_rm_install_dir && ok "已删除 $INSTALL_DIR"
     else
       warn "保留 $INSTALL_DIR"
     fi
   else
-    rm -rf "$INSTALL_DIR"
+    safe_rm_install_dir
   fi
   [[ -n "$SYSTEM_CONF" ]] && rm -f "$SYSTEM_CONF"
+  # 清理可能存在的 crontab @reboot 条目（setup_nohup 建议用户添加过）
+  if command -v crontab >/dev/null 2>&1; then
+    local cur_crontab
+    cur_crontab=$(crontab -l 2>/dev/null || true)
+    if [[ -n "$cur_crontab" ]] && echo "$cur_crontab" | grep -q "$INSTALL_DIR/start.sh"; then
+      echo "$cur_crontab" | grep -v "$INSTALL_DIR/start.sh" | crontab - 2>/dev/null || true
+      ok "已清理 crontab 中的开机自启条目"
+    fi
+  fi
   ok "卸载完成"
 }
 
@@ -543,8 +573,9 @@ do_status() {
     fi
   fi
   if [[ -f "$INSTALL_DIR/.env" ]]; then
-    echo "站点 URL：$(grep '^NEXTAUTH_URL=' "$INSTALL_DIR/.env" | cut -d= -f2- | tr -d '"')"
-    echo "数据库 ：$(grep '^DATABASE_URL=' "$INSTALL_DIR/.env" | sed -E 's|://[^@]+@|://***@|' | cut -d= -f2- | tr -d '"')"
+    # 去掉值首尾的单/双引号（.env 用单引号转义写入）
+    echo "站点 URL：$(grep '^NEXTAUTH_URL=' "$INSTALL_DIR/.env" | sed -E 's/^NEXTAUTH_URL=//; s/^['\''\"]//; s/['\''\"]$//')"
+    echo "数据库 ：$(grep '^DATABASE_URL=' "$INSTALL_DIR/.env" | sed -E 's/^DATABASE_URL=//; s/^['\''\"]//; s/['\''\"]$//; s|://[^@]+@|://***@|')"
   fi
 }
 
