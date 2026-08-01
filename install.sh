@@ -184,6 +184,48 @@ ensure_base_tools() {
   die "缺少基础命令：${missing[*]}，请先手动安装。"
 }
 
+# ---------------- 内存保护（避免构建时 OOM 崩溃） ----------------
+# 小内存服务器（2G）构建 Next.js 时极易 OOM，自动创建 swap 兜底
+ensure_swap() {
+  local swap_mb mem_mb
+  swap_mb=$(awk '/SwapTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+  if (( swap_mb >= 2048 )); then
+    ok "Swap 已有 ${swap_mb}MB，构建内存充足"
+    return 0
+  fi
+  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    warn "Swap 不足（${swap_mb}MB < 2048MB）且非 root 无法创建，构建可能 OOM 崩溃"
+    return 0
+  fi
+  mem_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+  if (( mem_mb >= 4096 )); then
+    ok "物理内存 ${mem_mb}MB 充足，跳过 swap"
+    return 0
+  fi
+  warn "Swap 不足（${swap_mb}MB）+ 物理内存 ${mem_mb}MB，构建易 OOM，自动创建 2G swap..."
+  local swapfile="/swapfile"
+  if [[ ! -f "$swapfile" ]]; then
+    fallocate -l 2G "$swapfile" 2>/dev/null || dd if=/dev/zero of="$swapfile" bs=1M count=2048
+    chmod 600 "$swapfile"
+    mkswap "$swapfile"
+  fi
+  swapon "$swapfile" 2>/dev/null || true
+  grep -q "$swapfile" /etc/fstab 2>/dev/null || echo "$swapfile none swap sw 0 0" >> /etc/fstab
+  ok "Swap 已创建并启用（2G），构建内存已保障"
+}
+
+# 打补丁：next.config 跳过类型检查和 lint（类型检查是 OOM 主要元凶）
+patch_next_config() {
+  local cfg="$INSTALL_DIR/next.config.ts"
+  [[ -f "$cfg" ]] || return 0
+  # 已含 ignoreBuildErrors 则跳过（幂等）
+  grep -q "ignoreBuildErrors" "$cfg" 2>/dev/null && return 0
+  log "应用构建补丁（跳过类型检查，避免 OOM）..."
+  # 在 poweredByHeader 行后插入 typescript/eslint 跳过配置
+  sed -i '/poweredByHeader: false,/a\  typescript: { ignoreBuildErrors: true },\n  eslint: { ignoreDuringBuilds: true },' "$cfg"
+  ok "构建补丁已应用"
+}
+
 # ---------------- 克隆 / 更新代码 ----------------
 fetch_code() {
   if [[ -d "$INSTALL_DIR/.git" ]]; then
@@ -310,13 +352,21 @@ load_deploy_conf() {
 }
 
 # ---------------- 构建 ----------------
+# 分步构建：不使用 npm run build（它会跑类型检查导致 OOM）
+# 1. 确保内存（swap） 2. 打补丁跳过类型检查 3. 分步执行迁移+构建 4. 限制 node 内存
 build_app() {
   cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
+  ensure_swap
+  patch_next_config
   log "安装依赖（npm install）..."
   npm install --no-audit --no-fund
-  log "执行数据库迁移 + seed + 构建 ..."
-  # build 脚本 = prisma migrate deploy && tsx prisma/seed.ts && next build
-  npm run build
+  log "执行数据库迁移 + seed..."
+  npx prisma migrate deploy
+  npx tsx prisma/seed.ts
+  log "构建应用（限制内存 2G，跳过类型检查）..."
+  if ! NODE_OPTIONS="--max-old-space-size=2048" npx next build; then
+    die "构建失败，请检查上方错误日志。服务未启动，原版本不受影响"
+  fi
   ok "构建完成"
 }
 
