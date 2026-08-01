@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import path from "path";
-import { getUploadDir } from "@/app/api/upload/route";
+import { getUploadDir } from "@/lib/upload-dir";
 
 // 上传图片的静态服务（standalone 模式下 public/ 是构建时快照，
 // 运行时上传的文件必须由动态路由提供，否则重启/更新后 404）

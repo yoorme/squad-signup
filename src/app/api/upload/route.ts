@@ -1,15 +1,10 @@
 import { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
+import { getUploadDir } from "@/lib/upload-dir";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
-
-// 上传目录：默认 <cwd>/uploads（独立于部署产物，更新版本不会丢图）
-// 生产环境通过 UPLOAD_DIR 环境变量指向持久目录（如 /opt/squad-signup/uploads）
-export function getUploadDir(): string {
-  return process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads");
-}
 
 // 常见图片格式的文件头魔数（防止伪造 Content-Type / 扩展名上传非图片文件）
 const MAGIC_SIGNATURES: { ext: string; bytes: number[]; offset?: number }[] = [
