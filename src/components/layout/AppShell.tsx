@@ -16,9 +16,11 @@ const defaultNavItems: NavItem[] = [
     href: "/announcements",
     label: "公告",
     icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path d="M3 11h3l9-5v12l-9-5H3z" strokeLinejoin="round" />
-        <path d="M16 8a3 3 0 0 1 0 8" />
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        {/* 喇叭锥体：左窄右宽，对称于 y=12 */}
+        <path d="M4 10v4h4l8 4V6l-8 4H4z" />
+        {/* 声波弧线 */}
+        <path d="M18.5 8.5a4 4 0 0 1 0 7" />
       </svg>
     ),
   },
