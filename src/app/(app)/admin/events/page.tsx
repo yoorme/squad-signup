@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { formatDateTime } from "@/lib/constants";
 import { TagEditor } from "@/components/events/TagEditor";
+import { AssignView } from "@/components/events/AssignView";
 
 interface Squad {
   id: string;
@@ -33,6 +34,7 @@ export default function AdminEventsPage() {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -144,7 +146,15 @@ export default function AdminEventsPage() {
               key={ev.id}
               ev={ev}
               editing={editingId === ev.id}
-              onToggleEdit={() => setEditingId(editingId === ev.id ? null : ev.id)}
+              assigning={assigningId === ev.id}
+              onToggleEdit={() => {
+                setEditingId(editingId === ev.id ? null : ev.id);
+                setAssigningId(null);
+              }}
+              onToggleAssign={() => {
+                setAssigningId(assigningId === ev.id ? null : ev.id);
+                setEditingId(null);
+              }}
               onSave={handleSaveEdit}
               onArchiveToggle={() => handleArchiveToggle(ev)}
               onDelete={() => handleDelete(ev)}
@@ -159,14 +169,18 @@ export default function AdminEventsPage() {
 function EventEditCard({
   ev,
   editing,
+  assigning,
   onToggleEdit,
+  onToggleAssign,
   onSave,
   onArchiveToggle,
   onDelete,
 }: {
   ev: EventItem;
   editing: boolean;
+  assigning: boolean;
   onToggleEdit: () => void;
+  onToggleAssign: () => void;
   onSave: (ev: EventItem, patch: any) => void;
   onArchiveToggle: () => void;
   onDelete: () => void;
@@ -224,6 +238,9 @@ function EventEditCard({
           <button className="win-btn" style={{ fontSize: 12, padding: "4px 10px", minHeight: 28 }} onClick={onToggleEdit}>
             {editing ? "收起" : "编辑"}
           </button>
+          <button className="win-btn" style={{ fontSize: 12, padding: "4px 10px", minHeight: 28 }} onClick={onToggleAssign}>
+            {assigning ? "收起" : "分配"}
+          </button>
           <button className="win-btn win-btn-secondary" style={{ fontSize: 12, padding: "4px 10px", minHeight: 28 }} onClick={onArchiveToggle}>
             {isArchived ? "恢复" : "归档"}
           </button>
@@ -232,6 +249,13 @@ function EventEditCard({
           </button>
         </div>
       </div>
+
+      {/* 分配区：拖拽调整队员分队/替补 */}
+      {assigning && (
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--win-border)" }}>
+          <AssignView eventId={ev.id} onClose={onToggleAssign} />
+        </div>
+      )}
 
       {/* 编辑区 */}
       {editing && (
