@@ -61,13 +61,14 @@ fi
 echo "✓ 产物已更新"
 
 echo "▶ 3/4 数据库迁移..."
-# 只装 prisma@6 + tsx（轻量，不 build，不会 OOM）
-# pin prisma v6：v7 有破坏性变更，schema.prisma 不再支持 url/directUrl
-npm install --no-audit --no-fund --no-save prisma@^6 tsx 2>/dev/null || \
-  npm install --no-audit --no-fund prisma@^6 tsx
+# 只装 prisma@6 + tsx@4（轻量，不 build，不会 OOM）
+# 必须锁版本：prisma v7 有破坏性变更，tsx 未来版本也可能不兼容
+npm install --no-audit --no-fund --no-save prisma@^6 tsx@^4 2>/dev/null || \
+  npm install --no-audit --no-fund prisma@^6 tsx@^4
 set -a; . ./.env; set +a
-npx prisma migrate deploy
-npx tsx prisma/seed.ts
+# 直接调本地 bin，避免 npx fallback 下载最新版
+./node_modules/.bin/prisma migrate deploy
+./node_modules/.bin/tsx prisma/seed.ts
 echo "✓ 迁移完成"
 
 echo "▶ 4/4 启动服务..."
