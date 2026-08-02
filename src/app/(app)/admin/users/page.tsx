@@ -105,6 +105,32 @@ export default function AdminUsersPage() {
     }
   };
 
+  // 硬删除账号：彻底删除用户及其级联数据
+  // 非级联数据（创建的公告/赛事/邀请码）转移给当前管理员保留
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const handleDelete = async (user: UserItem) => {
+    const yes = await confirm({
+      title: "删除账号（不可恢复）",
+      message: `确定要彻底删除「${user.username}」吗？\n\n该用户的报名记录、能力/职责/干员标签、公告已读/评论、赛事已读等数据将被永久删除。\n该用户创建的公告、赛事、邀请码将转移给您保留。\n\n此操作不可恢复！`,
+      danger: true,
+    });
+    if (!yes) return;
+    setDeletingId(user.id);
+    try {
+      const res = await fetch(`/api/admin/users?id=${encodeURIComponent(user.id)}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.ok) {
+        const d = data.data.deleted;
+        toast(`已删除「${d.username}」（报名 ${d.registrations}｜公告 ${d.announcements}｜赛事 ${d.events}｜邀请码 ${d.invitationCodes}）`, "success");
+        load();
+      } else {
+        toast(data.error || "删除失败", "error");
+      }
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div style={{ maxWidth: 1080, margin: "0 auto" }}>
       <Link href="/admin" style={{ fontSize: 13, color: "var(--win-text-secondary)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 12 }}>
@@ -180,6 +206,14 @@ export default function AdminUsersPage() {
                           onClick={() => handleToggleDisable(u)}
                         >
                           {u.disabled ? "启用" : "禁用"}
+                        </button>
+                        <button
+                          className="win-btn"
+                          style={{ fontSize: 11, padding: "3px 8px", minHeight: 24, color: "var(--win-danger)" }}
+                          onClick={() => handleDelete(u)}
+                          disabled={deletingId === u.id}
+                        >
+                          {deletingId === u.id ? "删除中..." : "删除"}
                         </button>
                       </div>
                     )}
