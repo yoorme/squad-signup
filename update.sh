@@ -61,11 +61,13 @@ fi
 echo "✓ 产物已更新"
 
 echo "▶ 3/4 数据库迁移..."
-# 只装 prisma@6 + tsx@4（轻量，不 build，不会 OOM）
-# 必须锁版本：prisma v7 有破坏性变更，tsx 未来版本也可能不兼容
-npm install --no-audit --no-fund --no-save prisma@^6 tsx@^4 2>/dev/null || \
-  npm install --no-audit --no-fund prisma@^6 tsx@^4
+# 装 prisma@6 + @prisma/client@6 + tsx@4（轻量，不 build，不会 OOM）
+# 必须锁版本 + 装 @prisma/client（seed.ts 需要 require 它）
+npm install --no-audit --no-fund --no-save prisma@^6 @prisma/client@^6 tsx@^4 2>/dev/null || \
+  npm install --no-audit --no-fund prisma@^6 @prisma/client@^6 tsx@^4
 set -a; . ./.env; set +a
+# 生成 Prisma Client
+./node_modules/.bin/prisma generate
 # 直接调本地 bin，避免 npx fallback 下载最新版
 ./node_modules/.bin/prisma migrate deploy
 ./node_modules/.bin/tsx prisma/seed.ts

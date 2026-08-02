@@ -326,20 +326,24 @@ load_deploy_conf() {
 }
 
 # ---------------- 数据库迁移 ----------------
-# 只安装 prisma + tsx（轻量，不 build，不会 OOM）
+# 只安装迁移+seed 必需的 3 个包（轻量，不 build，不会 OOM）
 # 必须锁版本！否则 npm 会装最新版引入破坏性变更：
 #   - prisma v7 不再支持 schema.prisma 的 url/directUrl → 迁移失败
 #   - tsx 未来 v5+ 可能调整 Node/ESBuild 要求 → seed 跑不起来
-# 与 package.json 对齐：prisma ^6.19.3 / tsx ^4.23.1
+#   - @prisma/client 必须与 prisma CLI 同大版本
+# 与 package.json 对齐：prisma ^6.19.3 / @prisma/client ^6.19.3 / tsx ^4.23.1
 run_migrate() {
   cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
-  log "安装 prisma@6 + tsx@4（仅迁移用，不构建）..."
-  npm install --no-audit --no-fund --no-save prisma@^6 tsx@^4 2>/dev/null || \
-    npm install --no-audit --no-fund prisma@^6 tsx@^4
+  log "安装 prisma@6 + @prisma/client@6 + tsx@4（仅迁移用，不构建）..."
+  npm install --no-audit --no-fund --no-save prisma@^6 @prisma/client@^6 tsx@^4 2>/dev/null || \
+    npm install --no-audit --no-fund prisma@^6 @prisma/client@^6 tsx@^4
+
+  # 生成 Prisma Client（@prisma/client 装好后需 generate 才能使用）
+  log "生成 Prisma Client..."
+  set -a; . "$INSTALL_DIR/.env"; set +a
+  ./node_modules/.bin/prisma generate
 
   log "执行数据库迁移 + seed..."
-  set -a; . "$INSTALL_DIR/.env"; set +a
-  # 直接调本地 bin，避免 npx 在 node_modules 异常时 fallback 下载最新版
   ./node_modules/.bin/prisma migrate deploy
   ./node_modules/.bin/tsx prisma/seed.ts
   ok "迁移完成"
