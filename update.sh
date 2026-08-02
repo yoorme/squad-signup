@@ -73,7 +73,37 @@ set -a; . ./.env; set +a
 ./node_modules/.bin/tsx prisma/seed.ts
 echo "✓ 迁移完成"
 
-echo "▶ 4/4 启动服务..."
+echo "▶ 4/4 重新配置 systemd 服务 + 启动..."
+# 重新生成 systemd 服务文件（预构建产物用 standalone/server.js，不是 next start）
+# 旧版 install.sh 创建的服务用 node_modules/.bin/next start，预构建模式下该文件不存在
+node_bin=$(command -v node)
+port=$(grep '^PORT=' "$INSTALL_DIR/.deploy.conf" 2>/dev/null | sed -E "s/^PORT=//; s/^['\"]//; s/['\"]$//" || echo "3000")
+if [[ -z "$port" ]]; then port="3000"; fi
+
+cat > /etc/systemd/system/squad-signup.service <<EOF
+[Unit]
+Description=squad-signup (三角洲行动战队赛事报名)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$INSTALL_DIR/.env
+Environment=NODE_ENV=production
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=$port
+ExecStart=$node_bin $INSTALL_DIR/standalone/server.js
+Restart=on-failure
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable squad-signup >/dev/null 2>&1 || true
+echo "✓ systemd 服务已更新（ExecStart=$node_bin standalone/server.js）"
+
 systemctl start squad-signup
 sleep 2
 if systemctl is-active --quiet squad-signup; then
