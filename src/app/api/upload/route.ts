@@ -39,8 +39,8 @@ export const DELETE = withErrorHandler(async (req: NextRequest) => {
     return fail("非法路径");
   }
   const fileName = relPath.slice("/uploads/".length);
-  // 禁止路径分隔符（只允许删除单个文件，不能跨目录）
-  if (fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) {
+  // 禁止路径分隔符 + 禁止空（path=/uploads/ 会导致 unlink 目录本身）
+  if (!fileName || fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) {
     return fail("非法文件名");
   }
 

@@ -19,7 +19,7 @@ function extractUploadPaths(markdown: string): Set<string> {
 
 // 安全校验：仅允许删除 UPLOAD_DIR 内的单个文件
 function safeResolve(fileName: string): string | null {
-  if (fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) return null;
+  if (!fileName || fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) return null;
   const uploadDir = getUploadDir();
   const fullPath = path.join(uploadDir, fileName);
   if (!fullPath.startsWith(uploadDir)) return null;
@@ -94,6 +94,10 @@ export const DELETE = withErrorHandler(async (req: NextRequest) => {
   await requireAdmin();
   const url = req.nextUrl;
   const mode = url.searchParams.get("mode") || "orphans"; // orphans | all
+  // 严格校验 mode：非法值会落到 else 分支导致 keepSet 为空，误删全部文件
+  if (mode !== "orphans" && mode !== "all") {
+    return fail("非法 mode 参数（仅支持 orphans / all）");
+  }
 
   const uploadDir = getUploadDir();
   let diskFiles: string[] = [];

@@ -22,7 +22,7 @@ function extractUploadPaths(markdown: string): string[] {
 async function safeDeleteUpload(relPath: string): Promise<void> {
   if (!relPath.startsWith("/uploads/")) return;
   const fileName = relPath.slice("/uploads/".length);
-  if (fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) return;
+  if (!fileName || fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) return;
   const uploadDir = getUploadDir();
   const fullPath = path.join(uploadDir, fileName);
   if (!fullPath.startsWith(uploadDir)) return;
