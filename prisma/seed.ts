@@ -45,7 +45,7 @@ async function main() {
   // 3. 能力 - 载具方向
   const vehicleCount = await prisma.ability.count({ where: { category: AbilityCategory.VEHICLE } });
   if (vehicleCount === 0) {
-    const vehicleAbilities = ["驾驶", "焊工", "骇车工"];
+    const vehicleAbilities = ["驾驶", "焊工", "骇车"];
     for (let i = 0; i < vehicleAbilities.length; i++) {
       await prisma.ability.create({
         data: { name: vehicleAbilities[i], category: AbilityCategory.VEHICLE, sortOrder: i },
@@ -117,9 +117,8 @@ async function main() {
   const operatorCount = await prisma.operator.count();
   if (operatorCount === 0) {
     const operators = [
-      "红狼", "薰", "蔓属", "骇爪", "深紫", "露娜", "乌鸦", "月辉",
-      "焰影", "虞蛇", "佐娅", "蜂医", "霸王", "狱焰", "刃影", "猎隼",
-      "深渊", "凯", "威龙", "红郎", "缪煞", "九曲",
+      "蛊", "骇爪", "深蓝", "露娜", "蜂医", "威龙", "乌鲁鲁", "疾风",
+      "无名", "蝶", "牧羊人", "液氮", "比特", "银翼",
     ];
     for (let i = 0; i < operators.length; i++) {
       await prisma.operator.create({ data: { name: operators[i], sortOrder: i } });

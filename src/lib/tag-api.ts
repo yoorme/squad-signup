@@ -38,7 +38,7 @@ export function updateTag(
 }
 
 export function deleteTag(type: TagType, id: string) {
-  return post({ type, op: "delete", id });
+  return post<{ success?: boolean; cascadeEvents?: number; cascadeSquads?: number; cascadeUsers?: number }>({ type, op: "delete", id });
 }
 
 export function toggleTagDisabled(type: TagType, id: string, disabled: boolean) {

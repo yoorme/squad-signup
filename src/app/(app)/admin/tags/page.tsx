@@ -126,19 +126,49 @@ export default function AdminTagsPage() {
     }
   };
 
-  // 删除：同步删除，仅确认/取消。被使用的标签无法删除，提示改用禁用。
+  // 删除（强制删除：连同使用位置一起清理）
   const handleDelete = async (item: AdminTagItem) => {
+    // 根据标签类型生成影响提示
+    const typeLabel = (() => {
+      switch (activeType) {
+        case "ability": case "duty": case "operator": return "用户标签";
+        case "nature": return "赛事性质";
+        case "name": return "赛事名称";
+        case "squadNature": return "分队性质";
+        case "map": return "赛事地图";
+        default: return "标签";
+      }
+    })();
+
+    const impactMsg = (() => {
+      if (activeType === "nature") {
+        return `⚠️ 若被赛事引用，将级联删除相关赛事（含分队和报名记录）。\n当前被 ${item.usedCount ?? 0} 个赛事使用。`;
+      }
+      if (activeType === "squadNature") {
+        return `⚠️ 若被分队引用，将级联删除相关分队（含报名记录）。\n当前被 ${item.usedCount ?? 0} 个分队使用。`;
+      }
+      if (activeType === "name" || activeType === "map") {
+        return `引用此标签的赛事将把该字段置空（赛事本身不受影响）。\n当前被 ${item.usedCount ?? 0} 个赛事使用。`;
+      }
+      return `已使用此标签的用户将自动移除关联。\n当前被 ${item.usedCount ?? 0} 个用户使用。`;
+    })();
+
     const yes = await confirm({
-      title: "删除标签",
-      message: `确定要删除「${item.name}」吗？被使用的标签无法删除，请改用「禁用」。`,
-      confirmText: "确认",
+      title: `删除${typeLabel}（完全删除）`,
+      message: `确定彻底删除「${item.name}」吗？\n\n${impactMsg}\n\n此操作不可恢复！`,
+      confirmText: "确认删除",
       cancelText: "取消",
       danger: true,
     });
     if (!yes) return;
     const data = await deleteTag(activeType, item.id);
     if (data.ok) {
-      toast("已删除", "success");
+      const d = data.data || {};
+      const parts: string[] = ["已删除"];
+      if (d.cascadeEvents) parts.push(`赛事 ${d.cascadeEvents}`);
+      if (d.cascadeSquads) parts.push(`分队 ${d.cascadeSquads}`);
+      if (d.cascadeUsers) parts.push(`用户关联 ${d.cascadeUsers}`);
+      toast(parts.join("｜"), "success");
       load();
     } else {
       toast(data.error || "删除失败", "error");

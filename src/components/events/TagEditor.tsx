@@ -93,21 +93,42 @@ export function TagEditor({ type, selectedId, onSelect }: Props) {
     }
   };
 
-  // 删除
+  // 删除（强制删除：连同使用位置一起清理）
   const handleDelete = async () => {
     if (!menu) return;
     const tag = menu.tag;
     setMenu(null);
+
+    // 根据标签类型生成影响提示
+    const impactMsg = (() => {
+      if (type === "nature") {
+        return `⚠️ 赛事性质被赛事引用时，将级联删除相关赛事（含分队和报名记录）。\n该标签当前被 ${tag.usedCount ?? 0} 个赛事使用。`;
+      }
+      if (type === "squadNature") {
+        return `⚠️ 分队性质被分队引用时，将级联删除相关分队（含报名记录）。\n该标签当前被 ${tag.usedCount ?? 0} 个分队使用。`;
+      }
+      if (type === "name" || type === "map") {
+        return `引用此标签的赛事将把该字段置空（赛事本身不受影响）。\n该标签当前被 ${tag.usedCount ?? 0} 个赛事使用。`;
+      }
+      return `已使用此标签的用户将自动移除该标签关联。\n该标签当前被 ${tag.usedCount ?? 0} 个用户使用。`;
+    })();
+
     const yes = await confirm({
-      title: "删除标签",
-      message: `确定删除「${tag.name}」吗？被使用的标签无法删除，请改用「禁用」。`,
-      confirmText: "删除",
+      title: "删除标签（完全删除）",
+      message: `确定彻底删除「${tag.name}」吗？\n\n${impactMsg}\n\n此操作不可恢复！`,
+      confirmText: "确认删除",
       danger: true,
     });
     if (!yes) return;
     const data = await deleteTag(type, tag.id);
     if (data.ok) {
-      toast("已删除", "success");
+      // 显示级联删除统计（若 API 返回）
+      const d = data.data || {};
+      const parts: string[] = ["已删除"];
+      if (d.cascadeEvents) parts.push(`赛事 ${d.cascadeEvents}`);
+      if (d.cascadeSquads) parts.push(`分队 ${d.cascadeSquads}`);
+      if (d.cascadeUsers) parts.push(`用户关联 ${d.cascadeUsers}`);
+      toast(parts.join("｜"), "success");
       if (selectedId === tag.id) {
         // 删除的是当前选中项，切到第一个可用标签
         const next = tags.find((t) => t.id !== tag.id);
