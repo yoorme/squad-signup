@@ -181,20 +181,8 @@ export default function AnnouncementDetailPage() {
           )}
         </div>
 
+        {/* 正文：图片已在 markdown 中以 ![](path) 形式渲染，无需二次展示 */}
         <Markdown content={detail.contentMarkdown} />
-
-        {detail.images.length > 0 && (
-          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-            {detail.images.map((img) => (
-              <img
-                key={img.id}
-                src={img.path}
-                alt="公告图片"
-                style={{ maxWidth: "100%", borderRadius: 8, border: "1px solid var(--win-border)" }}
-              />
-            ))}
-          </div>
-        )}
 
         {/* 确认按钮 */}
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--win-border)", display: "flex", justifyContent: "center" }}>

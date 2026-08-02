@@ -119,6 +119,29 @@ export default function AdminAnnouncementsPage() {
           })}
         </div>
       )}
+
+      {/* 上传文件管理入口 */}
+      <Link
+        href="/admin/uploads"
+        className="win-card"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 16px",
+          marginTop: 16,
+          textDecoration: "none",
+          color: "var(--win-text)",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>上传文件管理</div>
+          <div style={{ fontSize: 12, color: "var(--win-text-tertiary)", marginTop: 2 }}>
+            查看全部图片、清理未引用的孤儿文件、释放磁盘空间
+          </div>
+        </div>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      </Link>
     </div>
   );
 }

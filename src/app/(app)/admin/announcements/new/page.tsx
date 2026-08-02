@@ -9,6 +9,8 @@ import { Loading } from "@/components/ui/StateView";
 
 interface ImageItem { id?: string; path: string; }
 
+const MAX_IMAGES = 20;
+
 export default function AnnouncementEditorPage() {
   const params = useParams<{ id?: string }>();
   const router = useRouter();
@@ -22,6 +24,8 @@ export default function AnnouncementEditorPage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
+  const [deletingPath, setDeletingPath] = useState<string | null>(null);
+  const [previewImg, setPreviewImg] = useState<string | null>(null);
 
   const load = async () => {
     if (!isEdit) return;
@@ -41,8 +45,8 @@ export default function AnnouncementEditorPage() {
 
   const handleUpload = async (files: FileList) => {
     if (files.length === 0) return;
-    if (images.length + files.length > 9) {
-      toast("最多 9 张图片", "warning");
+    if (images.length + files.length > MAX_IMAGES) {
+      toast(`最多 ${MAX_IMAGES} 张图片`, "warning");
       return;
     }
     setUploading(true);
@@ -52,14 +56,62 @@ export default function AnnouncementEditorPage() {
       const res = await fetch("/api/upload", { method: "POST", body: formData });
       const data = await res.json();
       if (data.ok) {
-        setImages((prev) => [...prev, { path: data.data.path }]);
-        // 同时插入到 Markdown 内容
-        setContent((prev) => `${prev}\n\n![图片](${data.data.path})\n`);
+        const imgPath = data.data.path as string;
+        setImages((prev) => [...prev, { path: imgPath }]);
+        // 仅插入到 Markdown 内容（不再二次展示，避免重复）
+        setContent((prev) => `${prev}\n\n![图片](${imgPath})\n`);
       } else {
         toast(data.error || `${file.name} 上传失败`, "error");
       }
     }
     setUploading(false);
+  };
+
+  // 复制图片的 Markdown 引用形式
+  const handleCopyMarkdown = async (imgPath: string) => {
+    const md = `![图片](${imgPath})`;
+    try {
+      await navigator.clipboard.writeText(md);
+      toast("已复制：" + md, "success");
+    } catch {
+      // 降级：用临时 textarea
+      const ta = document.createElement("textarea");
+      ta.value = md;
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        toast("已复制：" + md, "success");
+      } catch {
+        toast("复制失败，请手动复制：" + md, "error");
+      }
+      document.body.removeChild(ta);
+    }
+  };
+
+  // 彻底删除图片：调 DELETE /api/upload 删盘 + 从 images 移除 + 从 markdown 移除引用
+  const handleDeleteImage = async (imgPath: string) => {
+    setDeletingPath(imgPath);
+    try {
+      const res = await fetch(`/api/upload?path=${encodeURIComponent(imgPath)}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!data.ok) {
+        toast(data.error || "删除失败", "error");
+        return;
+      }
+      // 从 images 数组移除
+      setImages((prev) => prev.filter((i) => i.path !== imgPath));
+      // 从 markdown 移除该图片的所有引用行
+      setContent((prev) => {
+        // 匹配整行 ![图片](path) 或单独的 ![...](path)
+        const escaped = imgPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const re = new RegExp(`\\n*!\\[[^\\]]*\\]\\(${escaped}\\)\\n*`, "g");
+        return prev.replace(re, "\n");
+      });
+      toast("图片已彻底删除", "success");
+    } finally {
+      setDeletingPath(null);
+    }
   };
 
   const handleSave = async () => {
@@ -185,7 +237,9 @@ export default function AnnouncementEditorPage() {
 
         {/* 图片上传 */}
         <div className="win-card" style={{ padding: 16 }}>
-          <label className="win-label">图片（最多 9 张，每张不超过 5MB）</label>
+          <label className="win-label">
+            图片（最多 {MAX_IMAGES} 张，每张不超过 5MB；点击缩略图可预览，左上角复制 Markdown，右上角彻底删除）
+          </label>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {images.map((img, idx) => (
               <div
@@ -199,9 +253,41 @@ export default function AnnouncementEditorPage() {
                   border: "1px solid var(--win-border)",
                 }}
               >
-                <img src={img.path} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <img
+                  src={img.path}
+                  alt=""
+                  onClick={() => setPreviewImg(img.path)}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "pointer" }}
+                />
+                {/* 左上角：复制 Markdown 按钮（上箭头图标） */}
                 <button
-                  onClick={() => setImages((prev) => prev.filter((_, i) => i !== idx))}
+                  onClick={() => handleCopyMarkdown(img.path)}
+                  title="复制 Markdown 引用"
+                  style={{
+                    position: "absolute",
+                    top: 2,
+                    left: 2,
+                    width: 20,
+                    height: 20,
+                    borderRadius: "50%",
+                    border: "none",
+                    background: "rgba(0,0,0,0.5)",
+                    color: "white",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                </button>
+                {/* 右上角：彻底删除按钮（叉号，删盘 + 清 markdown） */}
+                <button
+                  onClick={() => handleDeleteImage(img.path)}
+                  title="彻底删除（含磁盘文件）"
+                  disabled={deletingPath === img.path}
                   style={{
                     position: "absolute",
                     top: 2,
@@ -212,18 +298,18 @@ export default function AnnouncementEditorPage() {
                     border: "none",
                     background: "rgba(0,0,0,0.5)",
                     color: "white",
-                    cursor: "pointer",
+                    cursor: deletingPath === img.path ? "not-allowed" : "pointer",
                     fontSize: 11,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                   }}
                 >
-                  ✕
+                  {deletingPath === img.path ? "…" : "✕"}
                 </button>
               </div>
             ))}
-            {images.length < 9 && (
+            {images.length < MAX_IMAGES && (
               <label
                 style={{
                   width: 80,
@@ -250,6 +336,9 @@ export default function AnnouncementEditorPage() {
               </label>
             )}
           </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: "var(--win-text-tertiary)" }}>
+            已上传 {images.length} / {MAX_IMAGES} 张
+          </div>
         </div>
 
         {/* 操作按钮 */}
@@ -260,6 +349,49 @@ export default function AnnouncementEditorPage() {
           </button>
         </div>
       </div>
+
+      {/* 图片预览弹层 */}
+      {previewImg && (
+        <div
+          onClick={() => setPreviewImg(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            cursor: "zoom-out",
+            padding: 24,
+          }}
+        >
+          <img
+            src={previewImg}
+            alt="预览"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 8, objectFit: "contain" }}
+          />
+          <button
+            onClick={() => setPreviewImg(null)}
+            style={{
+              position: "absolute",
+              top: 16,
+              right: 16,
+              width: 36,
+              height: 36,
+              borderRadius: "50%",
+              border: "none",
+              background: "rgba(255,255,255,0.2)",
+              color: "white",
+              fontSize: 18,
+              cursor: "pointer",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }

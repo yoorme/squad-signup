@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
 import { getUploadDir } from "@/lib/upload-dir";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir, unlink } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
 
@@ -24,6 +24,42 @@ function sniffImageExt(buf: Buffer): string | null {
   }
   return null;
 }
+
+// 删除单个上传文件（仅管理员）
+// query: ?path=/uploads/xxx.png
+// 安全：仅允许删除 UPLOAD_DIR 内的文件，防路径穿越
+export const DELETE = withErrorHandler(async (req: NextRequest) => {
+  await requireAdmin();
+  const url = req.nextUrl;
+  const relPath = url.searchParams.get("path");
+  if (!relPath) return fail("缺少 path 参数");
+
+  // 仅接受 /uploads/前缀，避免传入绝对路径或 ../
+  if (!relPath.startsWith("/uploads/")) {
+    return fail("非法路径");
+  }
+  const fileName = relPath.slice("/uploads/".length);
+  // 禁止路径分隔符（只允许删除单个文件，不能跨目录）
+  if (fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) {
+    return fail("非法文件名");
+  }
+
+  const uploadDir = getUploadDir();
+  const fullPath = path.join(uploadDir, fileName);
+  // 二次校验：解析后路径必须仍在 uploadDir 内
+  if (!fullPath.startsWith(uploadDir)) {
+    return fail("非法路径");
+  }
+
+  try {
+    await unlink(fullPath);
+  } catch (e: any) {
+    if (e.code === "ENOENT") return ok({ deleted: false, reason: "文件不存在" });
+    // 其他错误（权限等）抛出
+    throw e;
+  }
+  return ok({ deleted: true });
+});
 
 // 图片上传接口（仅管理员）
 export const POST = withErrorHandler(async (req: NextRequest) => {
