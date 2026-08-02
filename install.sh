@@ -327,11 +327,14 @@ load_deploy_conf() {
 
 # ---------------- 数据库迁移 ----------------
 # 只安装 prisma + tsx（轻量，不 build，不会 OOM）
+# 注意：必须 pin prisma 大版本，否则 npm 会装最新版（如 v7 有破坏性变更，
+# schema.prisma 不再支持 url/directUrl，导致迁移失败）
+# 项目 package.json 里 @prisma/client/prisma 都是 ^6，这里同步 pin 到 ^6
 run_migrate() {
   cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
-  log "安装 prisma + tsx（仅迁移用，不构建）..."
-  npm install --no-audit --no-fund --no-save prisma tsx 2>/dev/null || \
-    npm install --no-audit --no-fund prisma tsx
+  log "安装 prisma@6 + tsx（仅迁移用，不构建）..."
+  npm install --no-audit --no-fund --no-save prisma@^6 tsx 2>/dev/null || \
+    npm install --no-audit --no-fund prisma@^6 tsx
 
   log "执行数据库迁移 + seed..."
   set -a; . "$INSTALL_DIR/.env"; set +a

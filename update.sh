@@ -61,9 +61,10 @@ fi
 echo "✓ 产物已更新"
 
 echo "▶ 3/4 数据库迁移..."
-# 只装 prisma + tsx（轻量，不 build，不会 OOM）
-npm install --no-audit --no-fund --no-save prisma tsx 2>/dev/null || \
-  npm install --no-audit --no-fund prisma tsx
+# 只装 prisma@6 + tsx（轻量，不 build，不会 OOM）
+# pin prisma v6：v7 有破坏性变更，schema.prisma 不再支持 url/directUrl
+npm install --no-audit --no-fund --no-save prisma@^6 tsx 2>/dev/null || \
+  npm install --no-audit --no-fund prisma@^6 tsx
 set -a; . ./.env; set +a
 npx prisma migrate deploy
 npx tsx prisma/seed.ts
