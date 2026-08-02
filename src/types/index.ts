@@ -118,6 +118,7 @@ export type EventDetail = Omit<EventSummary, "squads"> & {
 // /api/events/manage PATCH 的更新载荷（undefined=不修改，null=清空）
 export interface EventManagePatch {
   status?: "UPCOMING" | "ARCHIVED";
+  eventTime?: string; // ISO 或 datetime-local 字符串
   natureId?: string;
   nameId?: string | null;
   customName?: string | null;

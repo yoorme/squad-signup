@@ -32,6 +32,8 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   // opponent: string = 修改对手；null = 清空；undefined = 不修改
   const opponent = body?.opponent as string | null | undefined;
   const format = body?.format as "BO3" | "BO5" | "R2" | null | undefined;
+  // eventTime: string = 修改赛事时间；undefined = 不修改
+  const eventTimeRaw = body?.eventTime as string | undefined;
   // 分队性质修改：[{ squadId, natureId }]
   const squadUpdates = body?.squads as { id: string; natureId: string }[] | undefined;
 
@@ -44,6 +46,17 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   // 自定义名称校验：传了 customName 且非 null 时必须非空白
   if (customName !== undefined && customName !== null && customName.trim().length === 0) {
     return fail("自定义名称不能为空白");
+  }
+  // 赛事时间校验：传了 eventTime 必须能解析为合法日期
+  let eventDate: Date | undefined;
+  if (eventTimeRaw !== undefined) {
+    if (typeof eventTimeRaw !== "string" || eventTimeRaw.trim() === "") {
+      return fail("赛事时间不能为空");
+    }
+    eventDate = new Date(eventTimeRaw);
+    if (isNaN(eventDate.getTime())) {
+      return fail("赛事时间格式无效");
+    }
   }
 
   // 校验标签存在且未被禁用
@@ -85,9 +98,10 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     if (mapId !== undefined) evData.mapId = mapId; // null = 清空，string = 切换
     if (opponent !== undefined) evData.opponent = opponent ? opponent.trim() : null;
     if (format !== undefined) evData.format = format;
+    if (eventDate) evData.eventTime = eventDate;
 
-    // 当 name / customName / nature / opponent 任一变化时，同步重生成 title
-    const titleDirty = nameId !== undefined || customName !== undefined || natureId !== undefined || opponent !== undefined;
+    // 当 name / customName / nature / opponent / eventTime 任一变化时，同步重生成 title
+    const titleDirty = nameId !== undefined || customName !== undefined || natureId !== undefined || opponent !== undefined || !!eventDate;
     if (titleDirty) {
       const ev = await tx.event.findUnique({ where: { id }, include: { nature: true, name: true } });
       if (ev) {
@@ -109,11 +123,13 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
           }
           // 确定当前对手：传了新值用新值，否则用已有值
           const currentOpponent = opponent !== undefined ? (opponent ? opponent.trim() : "") : (ev.opponent ?? "");
+          // 确定当前时间：传了新值用新值，否则用已有值
+          const currentTime = eventDate || ev.eventTime;
           evData.title = buildEventTitle({
             displayName,
             natureName: nature.name,
             opponent: currentOpponent,
-            eventTime: ev.eventTime,
+            eventTime: currentTime,
           });
         }
       }

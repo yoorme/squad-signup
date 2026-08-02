@@ -13,6 +13,15 @@ import type { EventSummary, EventManagePatch } from "@/types";
 // 管理页的赛事条目与列表 API 返回结构一致
 type EventItem = EventSummary;
 
+// 将 ISO 时间字符串转为 datetime-local 控件兼容格式（YYYY-MM-DDTHH:mm，本地时区）
+function toLocalInput(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export default function AdminEventsPage() {
   const toast = useToast();
   const confirm = useConfirm();
@@ -180,6 +189,8 @@ function EventEditCard({
   const [squadNatures, setSquadNatures] = useState<Record<string, string>>(
     Object.fromEntries(ev.squads.map((s) => [s.id, s.nature.id]))
   );
+  // 赛事时间：datetime-local 输入控件兼容格式 YYYY-MM-DDTHH:mm
+  const [eventTime, setEventTime] = useState(toLocalInput(ev.eventTime));
   // 赛事名称标签列表（编辑时懒加载，供 tag 模式选择）
   const [nameTags, setNameTags] = useState<{ id: string; name: string }[]>([]);
 
@@ -200,7 +211,8 @@ function EventEditCard({
     setOpponent(ev.opponent ?? "");
     setFormat(ev.format);
     setSquadNatures(Object.fromEntries(ev.squads.map((s) => [s.id, s.nature.id])));
-  }, [ev.id, ev.nature.id, ev.name?.id, ev.customName, ev.opponent, ev.map?.id, ev.format]);
+    setEventTime(toLocalInput(ev.eventTime));
+  }, [ev.id, ev.nature.id, ev.name?.id, ev.customName, ev.opponent, ev.map?.id, ev.format, ev.eventTime]);
 
   const isArchived = ev.status === "ARCHIVED";
 
@@ -216,6 +228,7 @@ function EventEditCard({
     mapId !== (ev.map?.id ?? "") ||
     opponent.trim() !== (ev.opponent ?? "") ||
     format !== ev.format ||
+    eventTime !== toLocalInput(ev.eventTime) ||
     ev.squads.some((s) => squadNatures[s.id] !== s.nature.id);
 
   return (
@@ -272,6 +285,16 @@ function EventEditCard({
       {/* 编辑区 */}
       {editing && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--win-border)", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div>
+            <label className="win-label">赛事时间</label>
+            <input
+              type="datetime-local"
+              className="win-input"
+              value={eventTime}
+              onChange={(e) => setEventTime(e.target.value)}
+              style={{ maxWidth: 320 }}
+            />
+          </div>
           <div>
             <label className="win-label">赛事性质</label>
             <TagEditor type="nature" selectedId={natureId} onSelect={setNatureId} />
@@ -382,6 +405,8 @@ function EventEditCard({
               onClick={() => {
                 const patch: EventManagePatch = {};
                 if (natureId !== ev.nature.id) patch.natureId = natureId;
+                // 赛事时间：变化时发送 datetime-local 字符串，后端 new Date() 解析
+                if (eventTime !== toLocalInput(ev.eventTime)) patch.eventTime = eventTime;
                 // 赛事名称：按模式发送 nameId（null=未知/其他）+ customName（其他时为输入值）
                 if (nameChanged) {
                   patch.nameId = nameMode === "tag" ? nameId : null;
