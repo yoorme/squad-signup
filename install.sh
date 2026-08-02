@@ -32,6 +32,9 @@ DIST_URL="https://github.com/${REPO}/releases/download/latest/dist.tar.gz"
 DEFAULT_PORT="${PORT:-3000}"
 MIN_NODE_MAJOR=20
 NVM_VERSION="v0.39.7"
+# 国内加速镜像前缀（可选）：设置为 https://ghproxy.com/ 等可加速 GitHub Release 下载
+# 下载时优先用镜像，失败自动回退到 GitHub 原生地址
+MIRROR_URL="${MIRROR_URL:-}"
 
 # 安装目录：root 默认 /opt/squad-signup，普通用户默认 ~/squad-signup
 if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
@@ -184,12 +187,41 @@ ensure_base_tools() {
 # ---------------- 下载预构建产物 ----------------
 # 从 GitHub Release 下载 dist.tar.gz 并解压
 # dist.tar.gz 内含 standalone/（运行时）+ prisma/（迁移用）
+# 下载策略：若配置了 MIRROR_URL 则优先用镜像，失败自动回退 GitHub 原生
+download_dist() {
+  local out="$1"
+  local urls=()
+  if [[ -n "$MIRROR_URL" ]]; then
+    # 镜像前缀拼接（去掉末尾斜杠防重复）
+    local mirror="${MIRROR_URL%/}"
+    urls+=("${mirror}/${DIST_URL}")
+  fi
+  urls+=("$DIST_URL")  # 始终把原生 GitHub 作为兜底
+
+  local i=1
+  for url in "${urls[@]}"; do
+    log "下载（第 $i/${#urls[@]} 个源）：$url"
+    if curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o "$out" && [[ -s "$out" ]]; then
+      ok "下载成功（来源：$url）"
+      return 0
+    fi
+    rm -f "$out"
+    warn "此源下载失败，尝试下一个..."
+    i=$((i + 1))
+  done
+  return 1
+}
+
 fetch_dist() {
-  log "下载预构建产物（GitHub Release）..."
+  log "下载预构建产物..."
   local tmp_tar="/tmp/squad-signup-dist.tar.gz"
 
-  if ! curl -fsSL "$DIST_URL" -o "$tmp_tar"; then
-    die "下载产物失败。GitHub Actions 可能还在构建中，请稍后重试（查看：https://github.com/${REPO}/actions）"
+  if ! download_dist "$tmp_tar"; then
+    die "下载产物失败。可能原因：
+  1. GitHub Actions 还在构建中（查看：https://github.com/${REPO}/actions）
+  2. 网络问题——国内服务器可设置镜像加速：
+     MIRROR_URL=https://ghproxy.com/ bash install.sh
+  3. 镜像不可用——已自动回退 GitHub 原生仍失败"
   fi
   ok "产物下载完成（$(du -h "$tmp_tar" | cut -f1)）"
 
@@ -309,6 +341,7 @@ save_deploy_conf() {
     echo "PORT=$(env_escape "${PORT:-$DEFAULT_PORT}")"
     echo "BRANCH=$(env_escape "$BRANCH")"
     echo "INSTALL_DIR=$(env_escape "$INSTALL_DIR")"
+    echo "MIRROR_URL=$(env_escape "$MIRROR_URL")"
   } > "$conf"
   chmod 600 "$conf"
   if [[ -n "$SYSTEM_CONF" ]]; then
@@ -479,10 +512,37 @@ start_service() {
 }
 
 # ---------------- 安装 / 更新主流程 ----------------
+# 询问国内加速镜像（仅交互模式 + 未配置时）
+# 国内服务器从 GitHub Release 下载产物可能很慢或超时，配置镜像可大幅加速
+ask_mirror() {
+  # 已通过环境变量或 .deploy.conf 配置则跳过
+  [[ -n "$MIRROR_URL" ]] && return 0
+  if is_interactive; then
+    cat >&2 <<EOF
+
+${C_BOLD}国内服务器加速（可选）${C_RESET}
+GitHub Release 下载在国内可能很慢，可配置镜像加速（如 https://ghproxy.com/）。
+留空则直接用 GitHub 原生地址，下载失败时也会自动回退。
+
+EOF
+    local val=""
+    printf "%s?%s %s国内加速镜像前缀（回车=跳过）%s [%s]:%s " \
+      "$C_CYAN" "$C_RESET" "$C_BOLD" "$C_RESET" "跳过" "$C_RESET" >&2
+    IFS= read -r val </dev/tty || true
+    if [[ -n "$val" ]]; then
+      MIRROR_URL="${val%/}/"
+      ok "已设置镜像：$MIRROR_URL"
+    else
+      ok "不使用镜像，直接用 GitHub 原生"
+    fi
+  fi
+}
+
 do_install() {
   log "${C_BOLD}安装 squad-signup（预构建产物模式）${C_RESET}"
   ensure_base_tools
   ensure_node
+  ask_mirror
   fetch_dist
   load_deploy_conf
   configure_env

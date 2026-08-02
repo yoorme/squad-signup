@@ -10,6 +10,9 @@ set -euo pipefail
 INSTALL_DIR="/opt/squad-signup"
 REPO="yoorme/squad-signup"
 DIST_URL="https://github.com/${REPO}/releases/download/latest/dist.tar.gz"
+# 国内加速镜像前缀（可选）：从 .deploy.conf 读取，或用环境变量 MIRROR_URL 覆盖
+# 下载时优先用镜像，失败自动回退 GitHub 原生
+MIRROR_URL="${MIRROR_URL:-}"
 
 # 临时文件路径（trap 退出时清理，避免残留）
 TMP_TAR=""
@@ -34,6 +37,16 @@ cd "$INSTALL_DIR" 2>/dev/null || die "无法进入 $INSTALL_DIR（请先用 inst
 
 # 检查 .env 存在（迁移和运行都依赖它）
 [[ -f "$INSTALL_DIR/.env" ]] || die "$INSTALL_DIR/.env 不存在，无法更新。请先用 install.sh 安装"
+
+# 从 .deploy.conf 读取持久化的镜像配置（install.sh 时设置，环境变量 MIRROR_URL 优先级更高）
+if [[ -f "$INSTALL_DIR/.deploy.conf" ]]; then
+  conf_mirror=$(grep '^MIRROR_URL=' "$INSTALL_DIR/.deploy.conf" 2>/dev/null \
+    | sed -E "s/^MIRROR_URL=//; s/^['\"]//; s/['\"]$//" || true)
+  # 仅当环境变量未显式覆盖时才采用 .deploy.conf 的值
+  if [[ -z "$MIRROR_URL" && -n "$conf_mirror" ]]; then
+    MIRROR_URL="$conf_mirror"
+  fi
+fi
 
 # 检查 node 可用（nvm 装的 node 可能需要 source nvm.sh）
 if ! command -v node >/dev/null 2>&1; then
@@ -61,9 +74,36 @@ echo "✓ 服务已停止"
 # ================================================================
 echo "▶ 2/5 下载预构建产物..."
 TMP_TAR="/tmp/squad-signup-dist-$$.tar.gz"
-if ! curl -fsSL --connect-timeout 30 --max-time 300 "$DIST_URL" -o "$TMP_TAR"; then
-  echo "✗ 下载失败。GitHub Actions 可能还在构建中"
-  echo "  查看构建状态：https://github.com/${REPO}/actions"
+
+# 构建下载源列表：若配置了镜像则优先用镜像，原生 GitHub 始终作为兜底
+DOWNLOAD_URLS=()
+if [[ -n "$MIRROR_URL" ]]; then
+  mirror="${MIRROR_URL%/}"
+  DOWNLOAD_URLS+=("${mirror}/${DIST_URL}")
+fi
+DOWNLOAD_URLS+=("$DIST_URL")
+
+download_ok=false
+i=1
+total=${#DOWNLOAD_URLS[@]}
+for url in "${DOWNLOAD_URLS[@]}"; do
+  echo "  尝试第 ${i}/${total} 个源：$url"
+  if curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o "$TMP_TAR" && [[ -s "$TMP_TAR" ]]; then
+    echo "✓ 下载成功（来源：$url）"
+    download_ok=true
+    break
+  fi
+  rm -f "$TMP_TAR"
+  echo "! 此源下载失败，尝试下一个..."
+  i=$((i + 1))
+done
+
+if [[ "$download_ok" != "true" ]]; then
+  echo "✗ 下载失败。可能原因："
+  echo "  1. GitHub Actions 还在构建中（查看：https://github.com/${REPO}/actions）"
+  echo "  2. 网络问题——国内服务器可设置镜像加速："
+  echo "     MIRROR_URL=https://ghproxy.com/ bash update.sh"
+  echo "  3. 镜像不可用——已自动回退 GitHub 原生仍失败"
   echo "  服务已停止，原版本文件仍在，可手动恢复：systemctl start squad-signup"
   exit 1
 fi
