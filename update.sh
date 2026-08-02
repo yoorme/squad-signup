@@ -166,7 +166,7 @@ npm install --no-audit --no-fund --no-save prisma@^6 @prisma/client@^6 tsx@^4 bc
 [[ -x "./node_modules/.bin/prisma" ]] || die "prisma 安装失败（node_modules/.bin/prisma 不存在）"
 [[ -x "./node_modules/.bin/tsx" ]] || die "tsx 安装失败（node_modules/.bin/tsx 不存在）"
 
-echo "▶ 4/5 数据库迁移 + seed..."
+echo "▶ 4/5 数据库迁移..."
 set -a; . ./.env; set +a
 
 # 生成 Prisma Client（@prisma/client 装好后需 generate 才能使用）
@@ -177,12 +177,11 @@ set -a; . ./.env; set +a
 ./node_modules/.bin/prisma migrate deploy \
   || die "数据库迁移失败，服务未启动。检查 DATABASE_URL 是否正确，或手动修复后重跑：bash update.sh"
 
-# 跑 seed（幂等，失败不阻止服务启动——迁移成功后服务就能运行）
-if ! ./node_modules/.bin/tsx prisma/seed.ts; then
-  warn "seed 执行失败（不阻止启动，可稍后手动重跑：./node_modules/.bin/tsx prisma/seed.ts）"
-else
-  echo "✓ 迁移 + seed 完成"
-fi
+# 注意：不执行 seed.ts！
+# seed 只在首次 install.sh 时执行，update 时执行会导致已删除的干员/标签/管理员复活
+# 如需手动重新 seed（表为空时才会插入，不会复活已删数据）：
+#   cd /opt/squad-signup && set -a; . ./.env; set +a && ./node_modules/.bin/tsx prisma/seed.ts
+echo "✓ 数据库迁移完成"
 
 # ================================================================
 # 重新配置 systemd 服务 + 启动
