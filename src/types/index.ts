@@ -31,6 +31,9 @@ export interface TagItem {
   name: string;
   sortOrder?: number;
   disabled?: boolean;
+  // API（/api/admin/tags）返回的所有标签均附带使用计数，作为可选字段
+  // 便于 TagEditor 等组件直接消费而不必强制转换为 AdminTagItem
+  usedCount?: number;
 }
 
 // 标签类型（与 /api/admin/tags 的 type 参数对应）
