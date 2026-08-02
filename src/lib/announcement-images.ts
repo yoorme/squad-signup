@@ -48,16 +48,20 @@ async function safeDeleteUpload(relPath: string): Promise<void> {
  * 2. 正式路径 → 检查跨公告引用，被其他公告引用则复制新文件，返回路径映射
  *
  * 调用方需用返回的映射替换 markdown 和 images 中的路径。
+ * 返回值：
+ *   mapping: oldPath -> newPath（需替换的路径）
+ *   missingPaths: 无法处理的路径（tmp 文件不存在等），调用方应从 markdown 和 images 中移除
  *
  * @param currentAnnouncementId 当前公告 ID（新建时为 null）；用于排除自身查询跨公告引用
  */
 export async function processImagesOnSave(
   paths: Set<string>,
   currentAnnouncementId: string | null
-): Promise<Map<string, string>> {
+): Promise<{ mapping: Map<string, string>; missingPaths: Set<string> }> {
   const uploadDir = path.resolve(getUploadDir());
   await mkdir(uploadDir, { recursive: true });
   const mapping = new Map<string, string>(); // oldPath -> newPath
+  const missingPaths = new Set<string>(); // 无法处理的路径（调用方需移除）
 
   // 收集所有需要检查跨公告引用的"正式路径"
   const formalPaths = Array.from(paths).filter(
@@ -98,7 +102,8 @@ export async function processImagesOnSave(
     if (oldPath.startsWith("/uploads/tmp/")) {
       const fileName = oldPath.slice("/uploads/tmp/".length);
       if (!fileName || fileName.includes("/") || fileName.includes("\\")) {
-        continue; // 非法，跳过
+        missingPaths.add(oldPath); // 非法路径，调用方移除
+        continue;
       }
       const srcPath = path.join(uploadDir, "tmp", fileName);
       const dstPath = path.join(uploadDir, fileName);
@@ -108,7 +113,8 @@ export async function processImagesOnSave(
         mapping.set(oldPath, newPath);
       } catch (e: any) {
         if (e.code === "ENOENT") {
-          // tmp 文件不存在（可能已被清理），跳过
+          // tmp 文件不存在（可能已被清理），标记为缺失，调用方移除引用
+          missingPaths.add(oldPath);
           continue;
         }
         throw e;
@@ -120,6 +126,7 @@ export async function processImagesOnSave(
     if (otherReferencedPaths.has(oldPath)) {
       const fileName = oldPath.slice("/uploads/".length);
       if (!fileName || fileName.includes("/") || fileName.includes("\\")) {
+        missingPaths.add(oldPath); // 非法路径，调用方移除
         continue;
       }
       const srcPath = path.join(uploadDir, fileName);
@@ -132,7 +139,11 @@ export async function processImagesOnSave(
         const newPath = `/uploads/${newFileName}`;
         mapping.set(oldPath, newPath);
       } catch (e: any) {
-        if (e.code === "ENOENT") continue; // 源文件不存在，跳过
+        if (e.code === "ENOENT") {
+          // 源文件不存在（已被删除），原引用本就 broken，标记缺失让调用方移除
+          missingPaths.add(oldPath);
+          continue;
+        }
         throw e;
       }
       continue;
@@ -142,7 +153,7 @@ export async function processImagesOnSave(
     // mapping 中不记录（无需替换）
   }
 
-  return mapping;
+  return { mapping, missingPaths };
 }
 
 // 用路径映射替换 markdown 中的图片引用
@@ -155,6 +166,19 @@ export function applyPathMapping(markdown: string, mapping: Map<string, string>)
     const escaped = oldPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const re = new RegExp(`\\(${escaped}\\)`, "g");
     result = result.replace(re, `(${newPath})`);
+  }
+  return result;
+}
+
+// 从 markdown 中移除指定路径的图片引用（用于缺失文件清理）
+export function removePathsFromMarkdown(markdown: string, paths: Set<string>): string {
+  if (paths.size === 0) return markdown;
+  let result = markdown;
+  for (const p of paths) {
+    const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // 移除整行图片引用（含前后换行），避免遗留空行
+    const re = new RegExp(`\\n*!\\[[^\\]]*\\]\\(${escaped}\\)\\n*`, "g");
+    result = result.replace(re, "\n");
   }
   return result;
 }

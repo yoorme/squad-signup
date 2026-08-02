@@ -6,6 +6,7 @@ import {
   extractUploadPaths,
   processImagesOnSave,
   applyPathMapping,
+  removePathsFromMarkdown,
   deleteRemovedImages,
 } from "@/lib/announcement-images";
 
@@ -123,10 +124,15 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   // 处理图片：tmp→正式目录迁移 + 跨公告隔离
   // 收集所有引用路径（markdown + images 数组）
   const allPaths = new Set<string>([...images, ...extractUploadPaths(contentMarkdown)]);
-  const mapping = await processImagesOnSave(allPaths, null);
+  const { mapping, missingPaths } = await processImagesOnSave(allPaths, null);
   if (mapping.size > 0) {
     contentMarkdown = applyPathMapping(contentMarkdown, mapping);
     images = images.map((p) => mapping.get(p) ?? p);
+  }
+  // 移除缺失文件的引用（tmp 文件已被清理等场景），避免写入无效路径
+  if (missingPaths.size > 0) {
+    contentMarkdown = removePathsFromMarkdown(contentMarkdown, missingPaths);
+    images = images.filter((p) => !missingPaths.has(p));
   }
 
   const announcement = await prisma.announcement.create({
@@ -171,13 +177,28 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     const newImages = images ?? oldImagePaths;
     const newMd = contentMarkdown ?? existing.contentMarkdown;
     const allPaths = new Set<string>([...newImages, ...extractUploadPaths(newMd)]);
-    const mapping = await processImagesOnSave(allPaths, id);
+    const { mapping, missingPaths } = await processImagesOnSave(allPaths, id);
     if (mapping.size > 0) {
       if (contentMarkdown !== undefined) {
         contentMarkdown = applyPathMapping(contentMarkdown, mapping);
       }
       if (images !== undefined) {
         images = images.map((p) => mapping.get(p) ?? p);
+      }
+    }
+    // 移除缺失文件的引用（tmp 文件已被清理等场景）
+    if (missingPaths.size > 0) {
+      if (contentMarkdown !== undefined) {
+        contentMarkdown = removePathsFromMarkdown(contentMarkdown, missingPaths);
+      } else {
+        // 未传 contentMarkdown 但有缺失图：基于现有 markdown 移除后赋值
+        contentMarkdown = removePathsFromMarkdown(existing.contentMarkdown, missingPaths);
+      }
+      if (images !== undefined) {
+        images = images.filter((p) => !missingPaths.has(p));
+      } else {
+        // 未传 images 但有缺失图：基于旧 images 移除后赋值
+        images = oldImagePaths.filter((p) => !missingPaths.has(p));
       }
     }
   }
