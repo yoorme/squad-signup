@@ -108,12 +108,13 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   if (op === "delete") {
     if (!body.id) return fail("缺少 id");
-    // 强制删除：连同使用位置一起清理（用户明确要求"完全删除"）
-    // 用户标签（ability/duty/operator）：onDelete: Cascade 自动清理用户关联
-    // 赛事标签（name/map）：可空字段，先把引用置 null
-    // 赛事性质（nature）/分队性质（squadNature）：不可空字段，
-    //   删除标签会级联删除关联的赛事/分队（含报名记录），需前端强提示
+    // 完全删除：所有引用位置都清除该标签
+    // - 用户标签（ability/duty/operator）：onDelete Cascade 自动清理用户关联
+    // - 赛事名称/地图（name/map）：可空字段置 null，赛事保留
+    // - 赛事性质（nature）/分队性质（squadNature）：字段不可空，
+    //   若被引用则拒绝删除，提示用户先改用其他性质再删
     const result = await forceDeleteTag(type, body.id);
+    if ("error" in result) return fail(result.error);
     return ok({ success: true, ...result });
   }
 
@@ -194,73 +195,71 @@ async function deleteTag(type: TagType, id: string) {
   throw new Error("无效类型");
 }
 
-// 强制删除标签：连同使用位置一起清理
-// 返回删除统计，便于前端提示用户影响了哪些数据
-async function forceDeleteTag(type: TagType, id: string): Promise<{
-  cascadeEvents: number;
-  cascadeSquads: number;
-  cascadeUsers: number;
-}> {
-  let cascadeEvents = 0;
-  let cascadeSquads = 0;
+// 完全删除标签：所有引用位置都清除该标签
+// - 用户标签（ability/duty/operator）：onDelete Cascade 自动清理用户关联
+// - 赛事名称/地图（name/map）：可空字段置 null
+// - 赛事性质（nature）/分队性质（squadNature）：字段不可空，
+//   若被引用则拒绝删除，返回 error
+async function forceDeleteTag(type: TagType, id: string): Promise<
+  | { cascadeEvents: number; cascadeSquads: number; cascadeUsers: number }
+  | { error: string }
+> {
   let cascadeUsers = 0;
 
-  await prisma.$transaction(async (tx) => {
-    if (type === "ability") {
-      // UserAbility.onDelete: Cascade → 删 ability 时数据库自动清理 user 关联
-      cascadeUsers = await tx.userAbility.count({ where: { abilityId: id } });
-      await tx.ability.delete({ where: { id } });
-      return;
-    }
-    if (type === "duty") {
-      cascadeUsers = await tx.userDuty.count({ where: { dutyId: id } });
-      await tx.duty.delete({ where: { id } });
-      return;
-    }
-    if (type === "operator") {
-      cascadeUsers = await tx.userOperator.count({ where: { operatorId: id } });
-      await tx.operator.delete({ where: { id } });
-      return;
-    }
-    if (type === "nature") {
-      // Event.natureId 不可空 → 删除引用此 nature 的赛事（级联删 squads/registrations/reads）
-      const events = await tx.event.findMany({
-        where: { natureId: id },
-        select: { id: true, _count: { select: { squads: true } } },
-      });
-      cascadeEvents = events.length;
-      cascadeSquads = events.reduce((s, e) => s + e._count.squads, 0);
-      if (events.length > 0) {
-        await tx.event.deleteMany({ where: { natureId: id } });
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (type === "ability") {
+        cascadeUsers = await tx.userAbility.count({ where: { abilityId: id } });
+        await tx.ability.delete({ where: { id } });
+        return;
       }
-      await tx.eventNature.delete({ where: { id } });
-      return;
-    }
-    if (type === "name") {
-      // Event.nameId 可空 → 置 null，不删赛事
-      await tx.event.updateMany({ where: { nameId: id }, data: { nameId: null } });
-      await tx.eventName.delete({ where: { id } });
-      return;
-    }
-    if (type === "squadNature") {
-      // Squad.natureId 不可空 → 删除引用此 nature 的分队（级联删 registrations）
-      cascadeSquads = await tx.squad.count({ where: { natureId: id } });
-      if (cascadeSquads > 0) {
-        await tx.squad.deleteMany({ where: { natureId: id } });
+      if (type === "duty") {
+        cascadeUsers = await tx.userDuty.count({ where: { dutyId: id } });
+        await tx.duty.delete({ where: { id } });
+        return;
       }
-      await tx.squadNature.delete({ where: { id } });
-      return;
-    }
-    if (type === "map") {
-      // Event.mapId 可空 → 置 null，不删赛事
-      await tx.event.updateMany({ where: { mapId: id }, data: { mapId: null } });
-      await tx.eventMap.delete({ where: { id } });
-      return;
-    }
-    throw new Error("无效类型");
-  });
+      if (type === "operator") {
+        cascadeUsers = await tx.userOperator.count({ where: { operatorId: id } });
+        await tx.operator.delete({ where: { id } });
+        return;
+      }
+      if (type === "nature") {
+        // Event.natureId 不可空：若被赛事引用，拒绝删除
+        const usedCount = await tx.event.count({ where: { natureId: id } });
+        if (usedCount > 0) {
+          throw new Error(`该赛事性质被 ${usedCount} 个赛事使用，字段不可空无法直接删除。请先在赛事中改用其他性质，或使用「禁用」`);
+        }
+        await tx.eventNature.delete({ where: { id } });
+        return;
+      }
+      if (type === "name") {
+        // Event.nameId 可空 → 置 null
+        await tx.event.updateMany({ where: { nameId: id }, data: { nameId: null } });
+        await tx.eventName.delete({ where: { id } });
+        return;
+      }
+      if (type === "squadNature") {
+        // Squad.natureId 不可空：若被分队引用，拒绝删除
+        const usedCount = await tx.squad.count({ where: { natureId: id } });
+        if (usedCount > 0) {
+          throw new Error(`该分队性质被 ${usedCount} 个分队使用，字段不可空无法直接删除。请先在分队中改用其他性质，或使用「禁用」`);
+        }
+        await tx.squadNature.delete({ where: { id } });
+        return;
+      }
+      if (type === "map") {
+        // Event.mapId 可空 → 置 null
+        await tx.event.updateMany({ where: { mapId: id }, data: { mapId: null } });
+        await tx.eventMap.delete({ where: { id } });
+        return;
+      }
+      throw new Error("无效类型");
+    });
+  } catch (e: any) {
+    return { error: e.message || "删除失败" };
+  }
 
-  return { cascadeEvents, cascadeSquads, cascadeUsers };
+  return { cascadeEvents: 0, cascadeSquads: 0, cascadeUsers };
 }
 
 // 切换标签禁用状态：禁用后不可在新记录中使用，已使用的不受影响

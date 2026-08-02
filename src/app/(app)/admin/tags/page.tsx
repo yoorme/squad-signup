@@ -142,13 +142,13 @@ export default function AdminTagsPage() {
 
     const impactMsg = (() => {
       if (activeType === "nature") {
-        return `⚠️ 若被赛事引用，将级联删除相关赛事（含分队和报名记录）。\n当前被 ${item.usedCount ?? 0} 个赛事使用。`;
+        return `⚠️ 赛事性质字段不可空。若被赛事引用，将拒绝删除（需先改用其他性质）。\n当前被 ${item.usedCount ?? 0} 个赛事使用。`;
       }
       if (activeType === "squadNature") {
-        return `⚠️ 若被分队引用，将级联删除相关分队（含报名记录）。\n当前被 ${item.usedCount ?? 0} 个分队使用。`;
+        return `⚠️ 分队性质字段不可空。若被分队引用，将拒绝删除（需先改用其他性质）。\n当前被 ${item.usedCount ?? 0} 个分队使用。`;
       }
       if (activeType === "name" || activeType === "map") {
-        return `引用此标签的赛事将把该字段置空（赛事本身不受影响）。\n当前被 ${item.usedCount ?? 0} 个赛事使用。`;
+        return `引用此标签的赛事将清除该字段（赛事本身保留）。\n当前被 ${item.usedCount ?? 0} 个赛事使用。`;
       }
       return `已使用此标签的用户将自动移除关联。\n当前被 ${item.usedCount ?? 0} 个用户使用。`;
     })();

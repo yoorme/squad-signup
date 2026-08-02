@@ -102,13 +102,13 @@ export function TagEditor({ type, selectedId, onSelect }: Props) {
     // 根据标签类型生成影响提示
     const impactMsg = (() => {
       if (type === "nature") {
-        return `⚠️ 赛事性质被赛事引用时，将级联删除相关赛事（含分队和报名记录）。\n该标签当前被 ${tag.usedCount ?? 0} 个赛事使用。`;
+        return `⚠️ 赛事性质字段不可空。若被赛事引用，将拒绝删除（需先改用其他性质）。\n该标签当前被 ${tag.usedCount ?? 0} 个赛事使用。`;
       }
       if (type === "squadNature") {
-        return `⚠️ 分队性质被分队引用时，将级联删除相关分队（含报名记录）。\n该标签当前被 ${tag.usedCount ?? 0} 个分队使用。`;
+        return `⚠️ 分队性质字段不可空。若被分队引用，将拒绝删除（需先改用其他性质）。\n该标签当前被 ${tag.usedCount ?? 0} 个分队使用。`;
       }
       if (type === "name" || type === "map") {
-        return `引用此标签的赛事将把该字段置空（赛事本身不受影响）。\n该标签当前被 ${tag.usedCount ?? 0} 个赛事使用。`;
+        return `引用此标签的赛事将清除该字段（赛事本身保留）。\n该标签当前被 ${tag.usedCount ?? 0} 个赛事使用。`;
       }
       return `已使用此标签的用户将自动移除该标签关联。\n该标签当前被 ${tag.usedCount ?? 0} 个用户使用。`;
     })();
