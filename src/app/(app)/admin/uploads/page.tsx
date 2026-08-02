@@ -11,6 +11,7 @@ interface UploadFile {
   path: string;
   size: number;
   referenced: boolean;
+  tmp: boolean;
 }
 
 function formatSize(bytes: number): string {
@@ -40,52 +41,46 @@ export default function AdminUploadsPage() {
 
   useEffect(() => { load(); }, []);
 
-  const orphans = files.filter((f) => !f.referenced);
+  const tmpFiles = files.filter((f) => f.tmp);
+  const orphanFiles = files.filter((f) => !f.tmp && !f.referenced);
+  const referencedFiles = files.filter((f) => f.referenced);
   const totalSize = files.reduce((s, f) => s + f.size, 0);
-  const orphanSize = orphans.reduce((s, f) => s + f.size, 0);
+  const tmpSize = tmpFiles.reduce((s, f) => s + f.size, 0);
+  const orphanSize = orphanFiles.reduce((s, f) => s + f.size, 0);
 
-  const handleCleanOrphans = async () => {
-    const yes = await confirm({
-      title: "清理未引用的图片",
-      message: `将删除 ${orphans.length} 张未被任何公告引用的图片（约 ${formatSize(orphanSize)}），此操作不可恢复。是否继续？`,
-      danger: true,
-    });
+  const handleClean = async (mode: "orphans" | "all" | "tmp") => {
+    let msg = "";
+    let count = 0;
+    if (mode === "tmp") {
+      count = tmpFiles.length;
+      msg = `将删除 ${count} 个未保存的临时图片（约 ${formatSize(tmpSize)}）。这些是上传后未保存公告的残留文件。是否继续？`;
+    } else if (mode === "orphans") {
+      count = tmpFiles.length + orphanFiles.length;
+      msg = `将删除 ${count} 张未被任何公告引用的图片（含 ${tmpFiles.length} 个临时残留 + ${orphanFiles.length} 张孤儿正式图，约 ${formatSize(tmpSize + orphanSize)}），此操作不可恢复。是否继续？`;
+    } else {
+      count = referencedFiles.length + orphanFiles.length;
+      msg = `高危操作：将删除全部 ${count} 张正式图片（约 ${formatSize(totalSize - tmpSize)}），包括正在被公告引用的！公告中的图片将变为不可显示。此操作不可恢复。是否继续？`;
+    }
+    const yes = await confirm({ title: mode === "all" ? "删除全部正式图片（高危）" : "清理图片", message: msg, danger: true });
     if (!yes) return;
     setCleaning(true);
-    const res = await fetch("/api/admin/uploads?mode=orphans", { method: "DELETE" });
+    const res = await fetch(`/api/admin/uploads?mode=${mode}`, { method: "DELETE" });
     const data = await res.json();
     setCleaning(false);
     if (data.ok) {
-      toast(`已清理 ${data.data.deletedCount} 张图片`, "success");
+      toast(`已清理 ${data.data.deletedCount} 个文件`, "success");
       load();
     } else {
       toast(data.error || "清理失败", "error");
     }
   };
 
-  const handleCleanAll = async () => {
-    const yes = await confirm({
-      title: "删除全部图片（高危）",
-      message: `将删除 uploads 目录下全部 ${files.length} 张图片（约 ${formatSize(totalSize)}），包括正在被公告引用的！公告中的图片将变为不可显示。仅在你确认不再需要任何图片时使用。此操作不可恢复。是否继续？`,
-      danger: true,
-    });
-    if (!yes) return;
-    setCleaning(true);
-    const res = await fetch("/api/admin/uploads?mode=all", { method: "DELETE" });
-    const data = await res.json();
-    setCleaning(false);
-    if (data.ok) {
-      toast(`已删除 ${data.data.deletedCount} 张图片`, "success");
-      load();
-    } else {
-      toast(data.error || "删除失败", "error");
-    }
-  };
-
   const handleDeleteOne = async (file: UploadFile) => {
-    const msg = file.referenced
-      ? `该图片正被公告引用！删除后公告中图片将不可显示。确定删除 ${file.name}？`
-      : `确定删除未引用图片 ${file.name}？`;
+    const msg = file.tmp
+      ? `确定删除临时图片 ${file.name}？`
+      : file.referenced
+        ? `该图片正被公告引用！删除后公告中图片将不可显示。确定删除 ${file.name}？`
+        : `确定删除未引用图片 ${file.name}？`;
     const yes = await confirm({ title: "删除图片", message: msg, danger: true });
     if (!yes) return;
     const res = await fetch(`/api/upload?path=${encodeURIComponent(file.path)}`, { method: "DELETE" });
@@ -109,25 +104,30 @@ export default function AdminUploadsPage() {
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 4 }}>上传文件管理</h1>
           <p style={{ fontSize: 13, color: "var(--win-text-secondary)" }}>
-            共 {files.length} 张（{formatSize(totalSize)}），其中 {orphans.length} 张未引用（{formatSize(orphanSize)}）
+            共 {files.length} 个文件（{formatSize(totalSize)}）｜临时残留 {tmpFiles.length}（{formatSize(tmpSize)}）｜未引用 {orphanFiles.length}（{formatSize(orphanSize)}）｜已引用 {referencedFiles.length}
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {tmpFiles.length > 0 && (
+            <button className="win-btn" onClick={() => handleClean("tmp")} disabled={cleaning} style={{ fontSize: 12 }}>
+              {cleaning ? "清理中..." : `清理临时残留（${tmpFiles.length}）`}
+            </button>
+          )}
           <button
             className="win-btn"
-            onClick={handleCleanOrphans}
-            disabled={cleaning || orphans.length === 0}
+            onClick={() => handleClean("orphans")}
+            disabled={cleaning || (tmpFiles.length + orphanFiles.length) === 0}
             style={{ fontSize: 12 }}
           >
-            {cleaning ? "清理中..." : `清理未引用（${orphans.length}）`}
+            清理未引用（{tmpFiles.length + orphanFiles.length}）
           </button>
           <button
             className="win-btn"
-            onClick={handleCleanAll}
-            disabled={cleaning || files.length === 0}
+            onClick={() => handleClean("all")}
+            disabled={cleaning || (referencedFiles.length + orphanFiles.length) === 0}
             style={{ fontSize: 12, color: "var(--win-danger)" }}
           >
-            删除全部
+            删除全部正式
           </button>
         </div>
       </div>
@@ -148,50 +148,30 @@ export default function AdminUploadsPage() {
                   position: "relative",
                   borderRadius: 6,
                   overflow: "hidden",
-                  border: `1px solid ${file.referenced ? "var(--win-border)" : "var(--win-warning)"}`,
+                  border: `1px solid ${
+                    file.tmp ? "var(--win-warning)" :
+                    file.referenced ? "var(--win-border)" : "var(--win-warning)"
+                  }`,
                   aspectRatio: "1",
                 }}
               >
-                <img
-                  src={file.path}
-                  alt={file.name}
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-                {/* 状态标签 */}
+                <img src={file.path} alt={file.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 <div style={{
-                  position: "absolute",
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  background: "rgba(0,0,0,0.6)",
-                  color: "white",
-                  fontSize: 10,
-                  padding: "3px 6px",
-                  display: "flex",
-                  justifyContent: "space-between",
+                  position: "absolute", bottom: 0, left: 0, right: 0,
+                  background: "rgba(0,0,0,0.6)", color: "white", fontSize: 10,
+                  padding: "3px 6px", display: "flex", justifyContent: "space-between",
                 }}>
                   <span>{formatSize(file.size)}</span>
-                  <span>{file.referenced ? "已引用" : "未引用"}</span>
+                  <span>{file.tmp ? "临时" : file.referenced ? "已引用" : "未引用"}</span>
                 </div>
-                {/* 删除按钮 */}
                 <button
                   onClick={() => handleDeleteOne(file)}
                   title="删除"
                   style={{
-                    position: "absolute",
-                    top: 4,
-                    right: 4,
-                    width: 22,
-                    height: 22,
-                    borderRadius: "50%",
-                    border: "none",
-                    background: "rgba(0,0,0,0.6)",
-                    color: "white",
-                    cursor: "pointer",
-                    fontSize: 11,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
+                    position: "absolute", top: 4, right: 4, width: 22, height: 22,
+                    borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)",
+                    color: "white", cursor: "pointer", fontSize: 11,
+                    display: "flex", alignItems: "center", justifyContent: "center",
                   }}
                 >
                   ✕

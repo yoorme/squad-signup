@@ -5,7 +5,6 @@ import { getUploadDir } from "@/lib/upload-dir";
 import { writeFile, mkdir, unlink } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
-
 // 常见图片格式的文件头魔数（防止伪造 Content-Type / 扩展名上传非图片文件）
 const MAGIC_SIGNATURES: { ext: string; bytes: number[]; offset?: number }[] = [
   { ext: "png", bytes: [0x89, 0x50, 0x4e, 0x47] },
@@ -26,28 +25,33 @@ function sniffImageExt(buf: Buffer): string | null {
 }
 
 // 删除单个上传文件（仅管理员）
-// query: ?path=/uploads/xxx.png
-// 安全：仅允许删除 UPLOAD_DIR 内的文件，防路径穿越
+// query: ?path=/uploads/xxx.png 或 ?path=/uploads/tmp/xxx.png
+// 安全：仅允许删除 UPLOAD_DIR 内的文件（含 tmp 子目录），防路径穿越
 export const DELETE = withErrorHandler(async (req: NextRequest) => {
   await requireAdmin();
   const url = req.nextUrl;
   const relPath = url.searchParams.get("path");
   if (!relPath) return fail("缺少 path 参数");
 
-  // 仅接受 /uploads/前缀，避免传入绝对路径或 ../
+  // 仅接受 /uploads/ 前缀
   if (!relPath.startsWith("/uploads/")) {
     return fail("非法路径");
   }
-  const fileName = relPath.slice("/uploads/".length);
-  // 禁止路径分隔符 + 禁止空（path=/uploads/ 会导致 unlink 目录本身）
-  if (!fileName || fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) {
-    return fail("非法文件名");
+  // 提取 /uploads/ 之后的相对路径（可能含 tmp/ 前缀）
+  const relUnderUploads = relPath.slice("/uploads/".length);
+  // 拆分 segments，逐个校验：禁止 .. 和空 segment
+  const segments = relUnderUploads.split(/[\\/]/);
+  for (const seg of segments) {
+    if (!seg || seg === "..") return fail("非法路径");
   }
+  // 仅允许单层 tmp/ 或直接文件，禁止更深层嵌套
+  if (segments.length > 2) return fail("非法路径");
+  if (segments.length === 2 && segments[0] !== "tmp") return fail("非法路径");
 
   const uploadDir = getUploadDir();
-  const fullPath = path.join(uploadDir, fileName);
+  const fullPath = path.resolve(uploadDir, ...segments);
   // 二次校验：解析后路径必须仍在 uploadDir 内
-  if (!fullPath.startsWith(uploadDir)) {
+  if (fullPath !== uploadDir && !fullPath.startsWith(uploadDir + path.sep)) {
     return fail("非法路径");
   }
 
@@ -55,13 +59,14 @@ export const DELETE = withErrorHandler(async (req: NextRequest) => {
     await unlink(fullPath);
   } catch (e: any) {
     if (e.code === "ENOENT") return ok({ deleted: false, reason: "文件不存在" });
-    // 其他错误（权限等）抛出
     throw e;
   }
   return ok({ deleted: true });
 });
 
 // 图片上传接口（仅管理员）
+// 上传先写到 tmp 子目录，保存公告时由后端迁移到正式目录
+// 这样未保存就离开页面不会产生正式目录的孤儿文件
 export const POST = withErrorHandler(async (req: NextRequest) => {
   await requireAdmin();
   const formData = await req.formData();
@@ -87,8 +92,10 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   const fileName = `${randomUUID()}.${realExt}`;
   const uploadDir = getUploadDir();
-  await mkdir(uploadDir, { recursive: true });
-  await writeFile(path.join(uploadDir, fileName), buffer);
+  // 临时目录：保存公告时才迁移到正式目录
+  const tmpDir = path.join(uploadDir, "tmp");
+  await mkdir(tmpDir, { recursive: true });
+  await writeFile(path.join(tmpDir, fileName), buffer);
 
-  return ok({ path: `/uploads/${fileName}` });
+  return ok({ path: `/uploads/tmp/${fileName}` });
 });

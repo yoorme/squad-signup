@@ -89,26 +89,21 @@ export default function AnnouncementEditorPage() {
     }
   };
 
-  // 彻底删除图片：调 DELETE /api/upload 删盘 + 从 images 移除 + 从 markdown 移除引用
+  // 从编辑器移除图片（仅本地 state，不删盘）
+  // 保存时由后端 PATCH/POST 统一处理删盘（对比新旧 images/markdown）
+  // 未保存离开：tmp 文件由 /admin/uploads 清理；正式文件保留（可能仍被其他公告引用）
   const handleDeleteImage = async (imgPath: string) => {
     setDeletingPath(imgPath);
     try {
-      const res = await fetch(`/api/upload?path=${encodeURIComponent(imgPath)}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!data.ok) {
-        toast(data.error || "删除失败", "error");
-        return;
-      }
       // 从 images 数组移除
       setImages((prev) => prev.filter((i) => i.path !== imgPath));
       // 从 markdown 移除该图片的所有引用行
       setContent((prev) => {
-        // 匹配整行 ![图片](path) 或单独的 ![...](path)
         const escaped = imgPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const re = new RegExp(`\\n*!\\[[^\\]]*\\]\\(${escaped}\\)\\n*`, "g");
         return prev.replace(re, "\n");
       });
-      toast("图片已彻底删除", "success");
+      toast("已移除（保存后生效）", "success");
     } finally {
       setDeletingPath(null);
     }

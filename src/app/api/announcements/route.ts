@@ -2,36 +2,12 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser, requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
-import { getUploadDir } from "@/lib/upload-dir";
-import { unlink } from "fs/promises";
-import path from "path";
-
-// 从 markdown 文本中提取所有 /uploads/xxx 图片引用路径
-function extractUploadPaths(markdown: string): string[] {
-  const paths: string[] = [];
-  // 匹配 ![alt](/uploads/xxx.png) 形式
-  const re = /!\[[^\]]*\]\((\/uploads\/[^)]+)\)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(markdown)) !== null) {
-    paths.push(m[1]);
-  }
-  return paths;
-}
-
-// 安全删除磁盘文件（路径穿越校验 + 静默忽略不存在）
-async function safeDeleteUpload(relPath: string): Promise<void> {
-  if (!relPath.startsWith("/uploads/")) return;
-  const fileName = relPath.slice("/uploads/".length);
-  if (!fileName || fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) return;
-  const uploadDir = getUploadDir();
-  const fullPath = path.join(uploadDir, fileName);
-  if (!fullPath.startsWith(uploadDir)) return;
-  try {
-    await unlink(fullPath);
-  } catch (e: any) {
-    if (e.code !== "ENOENT") throw e;
-  }
-}
+import {
+  extractUploadPaths,
+  processImagesOnSave,
+  applyPathMapping,
+  deleteRemovedImages,
+} from "@/lib/announcement-images";
 
 // 获取公告列表（队员：返回是否有未读）
 export const GET = withErrorHandler(async (req: NextRequest) => {
@@ -138,13 +114,20 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   const user = await requireAdmin();
   const body = await req.json();
   const title = String(body?.title ?? "").trim();
-  const contentMarkdown = String(body?.contentMarkdown ?? "");
-  // images 仅用于编辑器缩略图展示，不再二次渲染到详情页（详情页只渲染 markdown）
-  // 仍保留以支持缩略图列表、复制 Markdown、按图删除等编辑器功能
-  const images: string[] = Array.isArray(body?.images) ? body.images : [];
+  let contentMarkdown = String(body?.contentMarkdown ?? "");
+  let images: string[] = Array.isArray(body?.images) ? body.images : [];
 
   if (!title) return fail("标题不能为空");
   if (!contentMarkdown) return fail("内容不能为空");
+
+  // 处理图片：tmp→正式目录迁移 + 跨公告隔离
+  // 收集所有引用路径（markdown + images 数组）
+  const allPaths = new Set<string>([...images, ...extractUploadPaths(contentMarkdown)]);
+  const mapping = await processImagesOnSave(allPaths, null);
+  if (mapping.size > 0) {
+    contentMarkdown = applyPathMapping(contentMarkdown, mapping);
+    images = images.map((p) => mapping.get(p) ?? p);
+  }
 
   const announcement = await prisma.announcement.create({
     data: {
@@ -167,8 +150,8 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   const body = await req.json();
   const id = String(body?.id ?? "");
   const title = body.title !== undefined ? String(body.title).trim() : undefined;
-  const contentMarkdown = body.contentMarkdown !== undefined ? String(body.contentMarkdown) : undefined;
-  const images: string[] | undefined = Array.isArray(body?.images) ? body.images : undefined;
+  let contentMarkdown = body.contentMarkdown !== undefined ? String(body.contentMarkdown) : undefined;
+  let images: string[] | undefined = Array.isArray(body?.images) ? body.images : undefined;
 
   if (!id) return fail("缺少公告 ID");
 
@@ -178,23 +161,31 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   });
   if (!existing) return fail("公告不存在", 404);
 
-  // 计算被移除的图片（旧 images - 新 images），需删盘
-  const removedPaths: string[] = [];
-  if (images !== undefined) {
-    const newSet = new Set(images);
-    for (const img of existing.images) {
-      if (!newSet.has(img.path)) removedPaths.push(img.path);
+  // 收集旧图片路径（images 表 + markdown 引用）
+  const oldImagePaths = existing.images.map((img) => img.path);
+  const oldMdPaths = Array.from(extractUploadPaths(existing.contentMarkdown));
+  const oldPaths = [...oldImagePaths, ...oldMdPaths];
+
+  // 处理图片：tmp→正式迁移 + 跨公告隔离（排除当前公告）
+  if (contentMarkdown !== undefined || images !== undefined) {
+    const newImages = images ?? oldImagePaths;
+    const newMd = contentMarkdown ?? existing.contentMarkdown;
+    const allPaths = new Set<string>([...newImages, ...extractUploadPaths(newMd)]);
+    const mapping = await processImagesOnSave(allPaths, id);
+    if (mapping.size > 0) {
+      if (contentMarkdown !== undefined) {
+        contentMarkdown = applyPathMapping(contentMarkdown, mapping);
+      }
+      if (images !== undefined) {
+        images = images.map((p) => mapping.get(p) ?? p);
+      }
     }
   }
 
-  // 计算新 markdown 中不再引用的图片（旧正文图片 - 新正文图片），需删盘
-  if (contentMarkdown !== undefined) {
-    const oldMdPaths = new Set(extractUploadPaths(existing.contentMarkdown));
-    const newMdPaths = new Set(extractUploadPaths(contentMarkdown));
-    for (const p of oldMdPaths) {
-      if (!newMdPaths.has(p)) removedPaths.push(p);
-    }
-  }
+  // 计算最终新路径集合（用于对比删盘）
+  const finalImages = images ?? oldImagePaths;
+  const finalMd = contentMarkdown ?? existing.contentMarkdown;
+  const newPaths = new Set<string>([...finalImages, ...extractUploadPaths(finalMd)]);
 
   await prisma.$transaction(async (tx) => {
     if (images !== undefined) {
@@ -214,12 +205,8 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     });
   });
 
-  // 数据库提交成功后再删盘（避免删盘成功但事务回滚导致图丢库还在）
-  // 去重后逐个删（一张图可能既在 images 又在 markdown）
-  const toDelete = Array.from(new Set(removedPaths));
-  for (const p of toDelete) {
-    await safeDeleteUpload(p).catch(() => {}); // 删盘失败不阻塞保存
-  }
+  // 删除被移除的旧图（跨公告安全：被其他公告引用的不删）
+  await deleteRemovedImages(oldPaths, newPaths, id).catch(() => {});
 
   return ok({ success: true });
 });
@@ -238,19 +225,17 @@ export const DELETE = withErrorHandler(async (req: NextRequest) => {
   });
   if (!announcement) return fail("公告不存在", 404);
 
-  const pathsToDelete: string[] = [
+  const oldPaths = [
     ...announcement.images.map((img) => img.path),
-    ...extractUploadPaths(announcement.contentMarkdown),
+    ...Array.from(extractUploadPaths(announcement.contentMarkdown)),
   ];
 
   // 删除数据库记录（级联删除 images/reads/comments）
   await prisma.announcement.delete({ where: { id } });
 
-  // 删盘（去重后逐个删，失败不阻塞）
-  const toDelete = Array.from(new Set(pathsToDelete));
-  for (const p of toDelete) {
-    await safeDeleteUpload(p).catch(() => {});
-  }
+  // 删盘：该公告的所有图都不再属于它（已删库），newPaths 为空
+  // deleteRemovedImages 会跨公告安全检查：被其他公告引用的不删
+  await deleteRemovedImages(oldPaths, new Set(), id).catch(() => {});
 
-  return ok({ success: true, deletedFiles: toDelete.length });
+  return ok({ success: true });
 });

@@ -5,81 +5,84 @@ import { ok, fail, withErrorHandler } from "@/lib/api";
 import { getUploadDir } from "@/lib/upload-dir";
 import { readdir, unlink, stat } from "fs/promises";
 import path from "path";
+import { extractUploadPaths } from "@/lib/announcement-images";
 
-// 从 markdown 文本中提取所有 /uploads/xxx 图片路径
-function extractUploadPaths(markdown: string): Set<string> {
-  const paths = new Set<string>();
-  const re = /!\[[^\]]*\]\((\/uploads\/[^)]+)\)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(markdown)) !== null) {
-    paths.add(m[1]);
+// 安全校验：仅允许删除 UPLOAD_DIR 内的单个文件（含 tmp 子目录）
+function safeResolve(relUnderUploads: string): string | null {
+  const segments = relUnderUploads.split(/[\\/]/);
+  for (const seg of segments) {
+    if (!seg || seg === "..") return null;
   }
-  return paths;
-}
-
-// 安全校验：仅允许删除 UPLOAD_DIR 内的单个文件
-function safeResolve(fileName: string): string | null {
-  if (!fileName || fileName.includes("/") || fileName.includes("\\") || fileName.includes("..")) return null;
-  const uploadDir = getUploadDir();
-  const fullPath = path.join(uploadDir, fileName);
-  if (!fullPath.startsWith(uploadDir)) return null;
+  if (segments.length > 2) return null;
+  if (segments.length === 2 && segments[0] !== "tmp") return null;
+  const uploadDir = path.resolve(getUploadDir());
+  const fullPath = path.resolve(uploadDir, ...segments);
+  if (fullPath !== uploadDir && !fullPath.startsWith(uploadDir + path.sep)) return null;
   return fullPath;
 }
 
-// 列出 uploads 目录全部图片文件 + 标记是否被引用
+// 列出 uploads 目录全部图片文件（含 tmp 子目录）+ 标记是否被引用
 // GET /api/admin/uploads
-//   返回 { files: [{ name, path, size, referenced, referencedBy }] }
 export const GET = withErrorHandler(async (req: NextRequest) => {
   await requireAdmin();
 
-  const uploadDir = getUploadDir();
-  let diskFiles: string[] = [];
+  const uploadDir = path.resolve(getUploadDir());
+  const files: { name: string; path: string; size: number; referenced: boolean; tmp: boolean }[] = [];
+
+  // 读取正式目录
+  let topFiles: string[] = [];
   try {
-    diskFiles = await readdir(uploadDir);
+    topFiles = await readdir(uploadDir);
   } catch (e: any) {
-    if (e.code === "ENOENT") {
-      return ok({ files: [] });
-    }
-    throw e;
+    if (e.code !== "ENOENT") throw e;
   }
 
-  // 仅列出图片文件（按扩展名过滤，避免误报 .DS_Store 等）
-  const imgExt = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"];
-  const imgFiles = diskFiles.filter((f) => {
-    const ext = path.extname(f).toLowerCase();
-    return imgExt.includes(ext);
-  });
+  // 读取 tmp 子目录
+  let tmpFiles: string[] = [];
+  try {
+    tmpFiles = await readdir(path.join(uploadDir, "tmp"));
+  } catch (e: any) {
+    if (e.code !== "ENOENT") throw e;
+  }
 
   // 收集数据库中所有被引用的图片路径
-  // 1. AnnouncementImage 表
   const dbImages = await prisma.announcementImage.findMany({ select: { path: true } });
   const dbImageSet = new Set(dbImages.map((i) => i.path));
-
-  // 2. Announcement.contentMarkdown 中引用的图片
   const announcements = await prisma.announcement.findMany({ select: { contentMarkdown: true } });
   const mdImageSet = new Set<string>();
   for (const a of announcements) {
-    for (const p of extractUploadPaths(a.contentMarkdown)) {
-      mdImageSet.add(p);
-    }
+    for (const p of extractUploadPaths(a.contentMarkdown)) mdImageSet.add(p);
   }
 
-  // 组装结果
-  const files = [];
-  for (const name of imgFiles) {
-    const fullPath = path.join(uploadDir, name);
+  const imgExt = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"];
+
+  // 正式目录文件
+  for (const name of topFiles) {
+    if (!imgExt.includes(path.extname(name).toLowerCase())) continue;
     const relPath = `/uploads/${name}`;
     let size = 0;
-    try {
-      const s = await stat(fullPath);
-      size = s.size;
-    } catch {}
-    const referenced = dbImageSet.has(relPath) || mdImageSet.has(relPath);
-    files.push({ name, path: relPath, size, referenced });
+    try { size = (await stat(path.join(uploadDir, name))).size; } catch {}
+    files.push({
+      name,
+      path: relPath,
+      size,
+      referenced: dbImageSet.has(relPath) || mdImageSet.has(relPath),
+      tmp: false,
+    });
   }
 
-  // 未引用的排前面（便于用户优先清理）
+  // tmp 目录文件（都是未保存的临时文件，一律视为未引用）
+  for (const name of tmpFiles) {
+    if (!imgExt.includes(path.extname(name).toLowerCase())) continue;
+    const relPath = `/uploads/tmp/${name}`;
+    let size = 0;
+    try { size = (await stat(path.join(uploadDir, "tmp", name))).size; } catch {}
+    files.push({ name, path: relPath, size, referenced: false, tmp: true });
+  }
+
+  // 排序：tmp 残留最前，其次未引用，最后已引用；同组按大小倒序
   files.sort((a, b) => {
+    if (a.tmp !== b.tmp) return a.tmp ? -1 : 1;
     if (a.referenced !== b.referenced) return a.referenced ? 1 : -1;
     return b.size - a.size;
   });
@@ -87,31 +90,21 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   return ok({ files });
 });
 
-// 清理孤儿文件（未被任何公告 images 表或 markdown 引用的图片）
-// DELETE /api/admin/uploads?mode=orphans  清理未引用的
-// DELETE /api/admin/uploads?mode=all      清理全部（危险！仅在确认无公告时使用）
+// 清理文件
+// DELETE /api/admin/uploads?mode=orphans  清理未引用的（含 tmp 残留）
+// DELETE /api/admin/uploads?mode=all      清理全部正式图片（高危，不动 tmp）
+// DELETE /api/admin/uploads?mode=tmp      仅清理 tmp 残留
 export const DELETE = withErrorHandler(async (req: NextRequest) => {
   await requireAdmin();
   const url = req.nextUrl;
-  const mode = url.searchParams.get("mode") || "orphans"; // orphans | all
-  // 严格校验 mode：非法值会落到 else 分支导致 keepSet 为空，误删全部文件
-  if (mode !== "orphans" && mode !== "all") {
-    return fail("非法 mode 参数（仅支持 orphans / all）");
+  const mode = url.searchParams.get("mode") || "orphans";
+  if (mode !== "orphans" && mode !== "all" && mode !== "tmp") {
+    return fail("非法 mode 参数（仅支持 orphans / all / tmp）");
   }
 
-  const uploadDir = getUploadDir();
-  let diskFiles: string[] = [];
-  try {
-    diskFiles = await readdir(uploadDir);
-  } catch (e: any) {
-    if (e.code === "ENOENT") return ok({ deletedCount: 0 });
-    throw e;
-  }
+  const uploadDir = path.resolve(getUploadDir());
 
-  const imgExt = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"];
-  const imgFiles = diskFiles.filter((f) => imgExt.includes(path.extname(f).toLowerCase()));
-
-  // 确定要保留的集合（mode=all 时为空集，全部删除）
+  // 收集数据库引用（mode=orphans 时用于判断保留）
   let keepSet = new Set<string>();
   if (mode === "orphans") {
     const dbImages = await prisma.announcementImage.findMany({ select: { path: true } });
@@ -124,16 +117,39 @@ export const DELETE = withErrorHandler(async (req: NextRequest) => {
 
   let deletedCount = 0;
   let failedCount = 0;
-  for (const name of imgFiles) {
-    const relPath = `/uploads/${name}`;
-    if (keepSet.has(relPath)) continue; // 被引用，跳过
-    const fullPath = safeResolve(name);
-    if (!fullPath) continue;
+  const imgExt = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"];
+
+  // 处理 tmp 目录（mode=orphans / mode=tmp 都清理 tmp）
+  if (mode === "orphans" || mode === "tmp") {
+    let tmpFiles: string[] = [];
     try {
-      await unlink(fullPath);
-      deletedCount++;
-    } catch {
-      failedCount++;
+      tmpFiles = await readdir(path.join(uploadDir, "tmp"));
+    } catch (e: any) {
+      if (e.code !== "ENOENT") throw e;
+    }
+    for (const name of tmpFiles) {
+      if (!imgExt.includes(path.extname(name).toLowerCase())) continue;
+      const fullPath = safeResolve(`tmp/${name}`);
+      if (!fullPath) continue;
+      try { await unlink(fullPath); deletedCount++; } catch { failedCount++; }
+    }
+  }
+
+  // 处理正式目录（mode=orphans / mode=all）
+  if (mode === "orphans" || mode === "all") {
+    let topFiles: string[] = [];
+    try {
+      topFiles = await readdir(uploadDir);
+    } catch (e: any) {
+      if (e.code !== "ENOENT") throw e;
+    }
+    for (const name of topFiles) {
+      if (!imgExt.includes(path.extname(name).toLowerCase())) continue;
+      const relPath = `/uploads/${name}`;
+      if (mode === "orphans" && keepSet.has(relPath)) continue;
+      const fullPath = safeResolve(name);
+      if (!fullPath) continue;
+      try { await unlink(fullPath); deletedCount++; } catch { failedCount++; }
     }
   }
 
