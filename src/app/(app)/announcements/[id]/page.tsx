@@ -181,32 +181,10 @@ export default function AnnouncementDetailPage() {
           )}
         </div>
 
-        {/* 正文：markdown 中的 ![](path) 会渲染图片 */}
+        {/* 正文：仅渲染 markdown 中的图片
+            images 表中未引用的图片是管理员保留的备用图，不在详情页展示
+            （管理员可在编辑器重新插入到 markdown 中） */}
         <Markdown content={detail.contentMarkdown} />
-
-        {/* 兼容历史数据：images 表中未被 markdown 引用的图片追加渲染
-            （新流程上传的图已在 markdown 中，不会重复；旧公告可能只在 images 表） */}
-        {(() => {
-          const mdPaths = new Set(
-            (detail.contentMarkdown.match(/!\[[^\]]*\]\((\/uploads\/[^)]+)\)/g) || [])
-              .map((s) => s.match(/\((\/uploads\/[^)]+)\)/)?.[1] || "")
-              .filter(Boolean)
-          );
-          const extra = detail.images.filter((img: any) => !mdPaths.has(img.path));
-          if (extra.length === 0) return null;
-          return (
-            <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-              {extra.map((img: any) => (
-                <img
-                  key={img.id}
-                  src={img.path}
-                  alt="公告图片"
-                  style={{ maxWidth: "100%", borderRadius: 8, border: "1px solid var(--win-border)" }}
-                />
-              ))}
-            </div>
-          );
-        })()}
 
         {/* 确认按钮 */}
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--win-border)", display: "flex", justifyContent: "center" }}>
