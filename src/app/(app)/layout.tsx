@@ -12,26 +12,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = session.user;
   const isAdmin = user.role === Role.ADMIN;
 
-  // 并行查询：未读公告数 + 未读的进行中赛事数（已归档/已过期赛事不计入红点）
-  const [totalAnnouncements, readAnnouncements, upcomingEvents] = await Promise.all([
-    prisma.announcement.count(),
-    prisma.announcementRead.count({ where: { userId: user.id } }),
-    prisma.event.findMany({
-      where: { status: "UPCOMING", eventTime: { gte: new Date() } },
-      select: { id: true },
+  // 并行查询红点未读数（反连接一次查出，替代原先 total-read 的多查询差值计算）
+  // - 公告：已归档的不计入未读红点
+  // - 赛事：仅未读的进行中赛事（已归档/已过期不计入），点击进入详情即确认收到
+  const [unreadAnnouncements, unreadEvents] = await Promise.all([
+    prisma.announcement.count({
+      where: { isArchived: false, reads: { none: { userId: user.id } } },
+    }),
+    prisma.event.count({
+      where: {
+        status: "UPCOMING",
+        eventTime: { gte: new Date() },
+        reads: { none: { userId: user.id } },
+      },
     }),
   ]);
-  const unreadAnnouncements = Math.max(0, totalAnnouncements - readAnnouncements);
-
-  const upcomingEventIds = upcomingEvents.map((e) => e.id);
-  const readEventIds = upcomingEventIds.length
-    ? await prisma.eventRead.findMany({
-        where: { userId: user.id, eventId: { in: upcomingEventIds } },
-        select: { eventId: true },
-      })
-    : [];
-  const readEventSet = new Set(readEventIds.map((r) => r.eventId));
-  const unreadEvents = upcomingEventIds.filter((id) => !readEventSet.has(id)).length;
 
   const navItems = [
     {

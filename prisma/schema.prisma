@@ -152,6 +152,8 @@ model Announcement {
   id              String   @id @default(cuid())
   title           String
   contentMarkdown String
+  isArchived      Boolean  @default(false) // 归档：仅管理员可见（公告管理/公告列表的已归档 tab）
+  archivedAt      DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   authorId        String
@@ -169,11 +171,11 @@ model AnnouncementImage {
   announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
 }
 
+// 公告阅读记录：仅用于导航红点（未读计数），无确认语义
 model AnnouncementRead {
   userId         String
   announcementId String
   readAt         DateTime  @default(now())
-  confirmedAt    DateTime?
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
   @@id([userId, announcementId])

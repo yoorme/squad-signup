@@ -28,6 +28,7 @@ interface EventListItem {
   name: Name | null;
   customName: string | null;
   map: EventMap | null;
+  isRead?: boolean;
   squads: Squad[];
   totalRegistered: number;
   totalSubstitutes: number;
@@ -122,6 +123,10 @@ function EventCard({ event }: { event: EventListItem }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            {/* 未读红点：仅即将进行的未读赛事展示，点击进入详情即确认收到 */}
+            {event.status === "UPCOMING" && !event.isRead && (
+              <span style={{ width: 8, height: 8, background: "var(--win-danger)", borderRadius: "50%", flexShrink: 0 }} />
+            )}
             <span
               className="win-chip"
               style={{

@@ -18,7 +18,6 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       _count: {
         select: {
           registrations: { where: { status: "REGISTERED" } },
-          announcementReads: true,
         },
       },
     },

@@ -3,24 +3,35 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth-server";
 import { ok, withErrorHandler } from "@/lib/api";
 
-// 公告管理列表（含统计）
+// 公告管理列表
+// status: normal（默认）| archived | all，配合前端 tab 切换
 export const GET = withErrorHandler(async (req: NextRequest) => {
   await requireAdmin();
-  const totalUsers = await prisma.user.count({ where: { disabled: false } });
+  const status = req.nextUrl.searchParams.get("status") || "normal"; // normal | archived | all
+
+  const where =
+    status === "archived"
+      ? { isArchived: true }
+      : status === "all"
+        ? {}
+        : { isArchived: false };
+
   const announcements = await prisma.announcement.findMany({
-    orderBy: { createdAt: "desc" },
+    where,
+    orderBy: { createdAt: "desc" }, // 时间倒序，新的在前
     include: {
-      _count: { select: { comments: true, reads: true } },
+      _count: { select: { comments: true } },
     },
   });
   return ok({
-    totalUsers,
     announcements: announcements.map((a) => ({
       id: a.id,
       title: a.title,
+      isArchived: a.isArchived,
+      archivedAt: a.archivedAt,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
-      _count: a._count,
+      commentCount: a._count.comments,
     })),
   });
 });

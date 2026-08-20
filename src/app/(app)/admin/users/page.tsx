@@ -16,7 +16,7 @@ interface UserItem {
   role: "ADMIN" | "MEMBER";
   disabled: boolean;
   createdAt: string;
-  _count: { registrations: number; announcementReads: number };
+  _count: { registrations: number };
 }
 
 export default function AdminUsersPage() {
@@ -154,7 +154,6 @@ export default function AdminUsersPage() {
                 <th style={{ padding: "10px 12px", textAlign: "left", color: "var(--win-text-secondary)", fontWeight: 600 }}>角色</th>
                 <th style={{ padding: "10px 12px", textAlign: "left", color: "var(--win-text-secondary)", fontWeight: 600 }}>状态</th>
                 <th style={{ padding: "10px 12px", textAlign: "left", color: "var(--win-text-secondary)", fontWeight: 600 }}>报名数</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", color: "var(--win-text-secondary)", fontWeight: 600 }}>已读公告</th>
                 <th style={{ padding: "10px 12px", textAlign: "left", color: "var(--win-text-secondary)", fontWeight: 600 }}>注册时间</th>
                 <th style={{ padding: "10px 12px", textAlign: "right", color: "var(--win-text-secondary)", fontWeight: 600 }}>操作</th>
               </tr>
@@ -181,7 +180,6 @@ export default function AdminUsersPage() {
                     </span>
                   </td>
                   <td style={{ padding: "10px 12px" }}>{u._count.registrations}</td>
-                  <td style={{ padding: "10px 12px" }}>{u._count.announcementReads}</td>
                   <td style={{ padding: "10px 12px", color: "var(--win-text-secondary)", fontSize: 12 }}>{formatDateTime(u.createdAt)}</td>
                   <td style={{ padding: "10px 12px", textAlign: "right", whiteSpace: "nowrap" }}>
                     {u.id !== myId && (

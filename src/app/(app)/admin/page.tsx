@@ -23,7 +23,7 @@ export default function AdminHome() {
     {
       href: "/admin/announcements",
       title: "公告管理",
-      desc: "发布公告、编辑/删除公告、查看阅读统计",
+      desc: "发布公告、编辑/删除公告、归档与恢复",
       icon: "📢",
     },
     {

@@ -142,11 +142,11 @@ export interface AnnouncementImage {
 export interface AnnouncementSummary {
   id: string;
   title: string;
+  isArchived?: boolean;
   createdAt: string;
   updatedAt?: string;
   author?: { username: string; nickname: string };
   isRead?: boolean;
-  confirmed?: boolean;
   commentCount?: number;
 }
 

@@ -14,11 +14,12 @@ interface AnnouncementDetail {
   id: string;
   title: string;
   contentMarkdown: string;
+  isArchived: boolean;
   createdAt: string;
   updatedAt: string;
   author: { id: string; username: string; nickname: string };
   images: { id: string; path: string }[];
-  reads: { confirmedAt: string | null }[];
+  isRead: boolean;
   comments: {
     id: string;
     content: string;
@@ -55,18 +56,31 @@ export default function AnnouncementDetailPage() {
     if (params.id) load();
   }, [params.id]);
 
-  const handleConfirm = async () => {
-    const res = await fetch("/api/announcements/confirm", {
-      method: "POST",
+  // 归档/恢复（管理员）：归档后普通队员不可见
+  const handleToggleArchive = async () => {
+    if (!detail) return;
+    const next = !detail.isArchived;
+    const yes = await confirm({
+      title: next ? "归档公告" : "恢复公告",
+      message: next
+        ? "归档后该公告将对普通队员隐藏（仅管理员可见），确定归档吗？"
+        : "恢复后该公告将重新对全体队员可见，确定恢复吗？",
+      confirmText: next ? "归档" : "恢复",
+      danger: next,
+    });
+    if (!yes) return;
+    const res = await fetch("/api/announcements", {
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ announcementId: params.id }),
+      body: JSON.stringify({ id: params.id, isArchived: next }),
     });
     const data = await res.json();
     if (data.ok) {
-      toast("已确认", "success");
+      toast(next ? "已归档" : "已恢复", "success");
       load();
+      router.refresh(); // 刷新导航红点
     } else {
-      toast(data.error || "确认失败", "error");
+      toast(data.error || "操作失败", "error");
     }
   };
 
@@ -136,8 +150,6 @@ export default function AnnouncementDetailPage() {
     return <div className="win-card" style={{ padding: 40, textAlign: "center" }}>公告不存在</div>;
   }
 
-  const isConfirmed = detail.reads.some((r) => r.confirmedAt);
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 880, margin: "0 auto" }}>
       <Link
@@ -162,7 +174,14 @@ export default function AnnouncementDetailPage() {
       <article className="win-card" style={{ padding: 24 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
           <div style={{ flex: 1 }}>
-            <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 8 }}>{detail.title}</h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+              {detail.isArchived && (
+                <span className="win-chip" style={{ fontSize: 11, background: "var(--win-bg-pressed)", color: "var(--win-text-tertiary)", flexShrink: 0 }}>
+                  已归档
+                </span>
+              )}
+              <h1 style={{ fontSize: 22, fontWeight: 600 }}>{detail.title}</h1>
+            </div>
             <div style={{ fontSize: 12, color: "var(--win-text-tertiary)", display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
               <Link href={`/members/${detail.author.id}`} style={{ color: "var(--win-text-secondary)", textDecoration: "none" }}>{detail.author.username}</Link>
               <span>发布于 {formatDateTime(detail.createdAt)}</span>
@@ -174,6 +193,9 @@ export default function AnnouncementDetailPage() {
               <Link href={`/admin/announcements/${detail.id}/edit`} className="win-btn win-btn-secondary" style={{ fontSize: 12, padding: "4px 10px", minHeight: 28 }}>
                 编辑
               </Link>
+              <button onClick={handleToggleArchive} className="win-btn" style={{ fontSize: 12, padding: "4px 10px", minHeight: 28 }}>
+                {detail.isArchived ? "恢复" : "归档"}
+              </button>
               <button onClick={handleDeleteAnnouncement} className="win-btn win-btn-danger" style={{ fontSize: 12, padding: "4px 10px", minHeight: 28 }}>
                 删除
               </button>
@@ -185,22 +207,6 @@ export default function AnnouncementDetailPage() {
             images 表中未引用的图片是管理员保留的备用图，不在详情页展示
             （管理员可在编辑器重新插入到 markdown 中） */}
         <Markdown content={detail.contentMarkdown} />
-
-        {/* 确认按钮 */}
-        <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--win-border)", display: "flex", justifyContent: "center" }}>
-          {isConfirmed ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--win-success)" }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span style={{ fontSize: 14, fontWeight: 500 }}>已确认</span>
-            </div>
-          ) : (
-            <button className="win-btn win-btn-primary" onClick={handleConfirm}>
-              确认已阅
-            </button>
-          )}
-        </div>
       </article>
 
       {/* 评论区 */}

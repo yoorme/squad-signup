@@ -10,13 +10,18 @@ import {
   deleteRemovedImages,
 } from "@/lib/announcement-images";
 
-// 获取公告列表（队员：返回是否有未读）
+// 获取公告列表/详情
+//
+// 归档规则：
+// - 普通队员：任何接口都看不到已归档公告（列表默认只返回未归档）
+// - 管理员：可通过 status 参数筛选 normal（默认）/ archived / all
 export const GET = withErrorHandler(async (req: NextRequest) => {
   const user = await requireUser();
   const url = req.nextUrl;
   const searchParams = url.searchParams;
   const mode = searchParams.get("mode") || "list"; // list | detail
   const id = searchParams.get("id");
+  const isAdmin = user.role === "ADMIN";
 
   if (mode === "detail") {
     if (!id) return fail("缺少公告 ID");
@@ -25,7 +30,6 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       include: {
         author: { select: { id: true, username: true, nickname: true } },
         images: { orderBy: { sortOrder: "asc" } },
-        reads: { where: { userId: user.id } },
         comments: {
           include: { user: { select: { id: true, username: true, nickname: true } } },
           orderBy: { createdAt: "asc" },
@@ -33,65 +37,46 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       },
     });
     if (!announcement) return fail("公告不存在", 404);
+    // 已归档公告仅管理员可查看
+    if (announcement.isArchived && !isAdmin) return fail("公告不存在", 404);
 
-    // 自动记录已阅读（upsert 幂等，避免重复创建；不再二次查询）
-    if (announcement.reads.length === 0) {
-      await prisma.announcementRead.upsert({
+    // 自动记录已阅读（upsert 幂等），仅用于导航红点未读计数
+    await prisma.announcementRead
+      .upsert({
         where: {
           userId_announcementId: { userId: user.id, announcementId: announcement.id },
         },
         create: { userId: user.id, announcementId: announcement.id },
         update: {},
-      }).catch(() => {});
-    }
+      })
+      .catch(() => {});
 
-    return ok(announcement);
-  }
-
-  if (mode === "stats" && user.role === "ADMIN") {
-    // 管理员查看每条公告的阅读统计
-    if (!id) return fail("缺少公告 ID");
-    const totalUsers = await prisma.user.count({ where: { disabled: false } });
-    const announcement = await prisma.announcement.findUnique({
-      where: { id },
-      include: {
-        reads: {
-          include: {
-            user: { select: { id: true, username: true, nickname: true } },
-          },
-        },
+    // 标记当前用户是否已读（红点用）
+    const myRead = await prisma.announcementRead.findUnique({
+      where: {
+        userId_announcementId: { userId: user.id, announcementId: announcement.id },
       },
+      select: { readAt: true },
     });
-    if (!announcement) return fail("公告不存在", 404);
 
-    const readCount = announcement.reads.length;
-    const confirmedCount = announcement.reads.filter((r) => r.confirmedAt).length;
-    const readUserIds = new Set(announcement.reads.map((r) => r.userId));
-    const allUsers = await prisma.user.findMany({
-      where: { disabled: false },
-      select: { id: true, username: true, nickname: true },
-    });
-    const unreadUsers = allUsers.filter((u) => !readUserIds.has(u.id));
-
-    return ok({
-      totalUsers,
-      readCount,
-      confirmedCount,
-      unreadUsers,
-      readUsers: announcement.reads.map((r) => ({
-        user: r.user,
-        readAt: r.readAt,
-        confirmedAt: r.confirmedAt,
-      })),
-    });
+    return ok({ ...announcement, isRead: !!myRead });
   }
 
-  // 默认：列表
+  // 列表：普通队员强制只看未归档；管理员可筛选
+  const statusParam = searchParams.get("status") || "normal"; // normal | archived | all
+  const where =
+    isAdmin && statusParam === "archived"
+      ? { isArchived: true }
+      : isAdmin && statusParam === "all"
+        ? {}
+        : { isArchived: false };
+
   const announcements = await prisma.announcement.findMany({
-    orderBy: { createdAt: "desc" },
+    where,
+    orderBy: { createdAt: "desc" }, // 时间倒序，新的在前
     include: {
       author: { select: { username: true, nickname: true } },
-      reads: { where: { userId: user.id }, select: { confirmedAt: true } },
+      reads: { where: { userId: user.id }, select: { readAt: true } },
       _count: { select: { comments: true } },
     },
   });
@@ -103,8 +88,8 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
       author: a.author,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
+      isArchived: a.isArchived,
       isRead: a.reads.length > 0,
-      isConfirmed: a.reads.some((r) => r.confirmedAt),
       commentCount: a._count.comments,
     }))
   );
@@ -150,7 +135,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   return ok(announcement);
 });
 
-// 修改公告（管理员）
+// 修改公告（管理员）：标题/内容/归档状态
 export const PATCH = withErrorHandler(async (req: NextRequest) => {
   await requireAdmin();
   const body = await req.json();
@@ -158,8 +143,21 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   const title = body.title !== undefined ? String(body.title).trim() : undefined;
   let contentMarkdown = body.contentMarkdown !== undefined ? String(body.contentMarkdown) : undefined;
   let images: string[] | undefined = Array.isArray(body?.images) ? body.images : undefined;
+  // 归档/恢复：isArchived true=归档 false=恢复；恢复时清空 archivedAt
+  const isArchived = body.isArchived !== undefined ? Boolean(body.isArchived) : undefined;
 
   if (!id) return fail("缺少公告 ID");
+
+  // 纯归档/恢复操作：直接更新，无需走图片处理
+  if (isArchived !== undefined && title === undefined && contentMarkdown === undefined && images === undefined) {
+    const existing0 = await prisma.announcement.findUnique({ where: { id }, select: { id: true } });
+    if (!existing0) return fail("公告不存在", 404);
+    await prisma.announcement.update({
+      where: { id },
+      data: { isArchived, archivedAt: isArchived ? new Date() : null },
+    });
+    return ok({ success: true });
+  }
 
   const existing = await prisma.announcement.findUnique({
     where: { id },
@@ -222,6 +220,10 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
       data: {
         ...(title !== undefined && { title }),
         ...(contentMarkdown !== undefined && { contentMarkdown }),
+        ...(isArchived !== undefined && {
+          isArchived,
+          archivedAt: isArchived ? new Date() : null,
+        }),
       },
     });
   });
