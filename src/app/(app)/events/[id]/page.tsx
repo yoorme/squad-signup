@@ -285,14 +285,12 @@ function SquadDisplayView({
           );
         })}
 
-        {/* 替补区 */}
-        <div style={{ height: 32 }} />
+        {/* 替补区：与分队列表之间只保留一条细线（分队行的 borderBottom） */}
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "120px 1fr",
             padding: "12px",
-            borderTop: "2px solid var(--win-border)",
             alignItems: "center",
             background: myReg?.isSubstitute ? "var(--win-bg-selected)" : "transparent",
           }}
