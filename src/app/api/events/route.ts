@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser, requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
 import { calculateSquadCount, isValidSquadCount, buildEventTitle } from "@/lib/constants";
+import { autoArchiveExpiredEvents } from "@/lib/event-auto-archive";
 
 // 事件详情查询的完整 payload 类型（含 squads/registrations/user 关联）
 type EventDetailPayload = Prisma.EventGetPayload<{
@@ -54,6 +55,10 @@ export const GET = withErrorHandler(async (req: NextRequest) => {
   const url = req.nextUrl;
   const status = url.searchParams.get("status") || "UPCOMING"; // UPCOMING | ARCHIVED | ALL
   const id = url.searchParams.get("id"); // 指定赛事 ID → 单个详情
+
+  // 过期赛事自动归档：赛事开始时间已过的 UPCOMING → ARCHIVED
+  // （懒更新，无需定时任务；保证"已结束"里能看到历史赛事）
+  await autoArchiveExpiredEvents();
 
   // 单个赛事详情：只查一条，避免拉全量
   if (id) {

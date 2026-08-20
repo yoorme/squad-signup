@@ -59,6 +59,19 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     }
   }
 
+  // 恢复校验：赛事时间已过的赛事恢复为 UPCOMING 后，
+  // 会在下次查询时被自动归档（见 event-auto-archive），形成"恢复无效"的困惑。
+  // 提前拦截，引导管理员先修改赛事时间再恢复。
+  if (status === "UPCOMING") {
+    const ev = await prisma.event.findUnique({ where: { id }, select: { eventTime: true } });
+    if (ev) {
+      const finalTime = eventDate || ev.eventTime;
+      if (finalTime.getTime() < Date.now()) {
+        return fail("赛事时间已过，请先在「编辑」中修改赛事时间，再恢复为即将进行");
+      }
+    }
+  }
+
   // 校验标签存在且未被禁用
   if (natureId) {
     const n = await prisma.eventNature.findUnique({ where: { id: natureId } });
