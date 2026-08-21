@@ -104,7 +104,16 @@ if [[ "$download_ok" != "true" ]]; then
   echo "  2. 网络问题——国内服务器可设置镜像加速："
   echo "     MIRROR_URL=https://ghproxy.com/ bash update.sh"
   echo "  3. 镜像不可用——已自动回退 GitHub 原生仍失败"
-  echo "  服务已停止，原版本文件仍在，可手动恢复：systemctl start squad-signup"
+  # 自动恢复：旧版本文件未受影响，尝试直接把旧版启动回来，站点不中断
+  if [[ -f "$INSTALL_DIR/standalone/server.js" ]]; then
+    echo "  正在尝试恢复启动旧版本..."
+    systemctl start squad-signup 2>/dev/null || true
+    if systemctl is-active --quiet squad-signup 2>/dev/null; then
+      echo "✓ 旧版本已恢复运行，站点不受影响，稍后重新执行更新即可"
+    else
+      echo "  旧版本未能自动启动，可手动恢复：systemctl start squad-signup"
+    fi
+  fi
   exit 1
 fi
 
@@ -130,10 +139,33 @@ TMP_TAR=""
 TMP_ENV_BACKUP=$(mktemp)
 cp "$INSTALL_DIR/.env" "$TMP_ENV_BACKUP"
 
-# 替换 standalone 和 prisma
-rm -rf "$INSTALL_DIR/standalone" "$INSTALL_DIR/prisma"
-mv "$TMP_EXTRACT/standalone" "$INSTALL_DIR/standalone"
-mv "$TMP_EXTRACT/prisma" "$INSTALL_DIR/prisma"
+# 原子替换目录：旧目录改名 .old 保留 → 移入新目录 → 全部成功后清理 .old；
+# 移入失败自动回滚旧版本。任意时刻中断都保证「旧版或新版至少一个完整可用」，
+# 中断后重跑 update.sh 即可继续
+replace_dir() {
+  local src="$1" dst="$2"
+  local old="${dst}.old"
+  if [[ -e "$dst" ]]; then
+    rm -rf "$old"
+    mv "$dst" "$old"
+  fi
+  if mv "$src" "$dst"; then
+    rm -rf "$old"
+    return 0
+  fi
+  # 移入失败：回滚旧版本
+  if [[ -e "$old" ]]; then
+    rm -rf "$dst"
+    mv "$old" "$dst" || die "严重：回滚失败，请手动检查 $INSTALL_DIR 目录"
+  fi
+  return 1
+}
+if ! replace_dir "$TMP_EXTRACT/standalone" "$INSTALL_DIR/standalone" \
+   || ! replace_dir "$TMP_EXTRACT/prisma" "$INSTALL_DIR/prisma"; then
+  cp "$TMP_ENV_BACKUP" "$INSTALL_DIR/.env"
+  rm -f "$TMP_ENV_BACKUP"; TMP_ENV_BACKUP=""
+  die "产物替换失败，已自动回滚到旧版本。旧版可正常启动，稍后重试更新即可"
+fi
 rm -rf "$TMP_EXTRACT"
 TMP_EXTRACT=""
 

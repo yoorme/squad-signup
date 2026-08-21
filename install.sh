@@ -28,6 +28,19 @@
 
 set -euo pipefail
 
+# ---------------- 中断恢复 ----------------
+# 跟踪所有临时文件：脚本被 Ctrl+C / 断网 / 异常中断退出时自动清理，避免 /tmp 残留
+TMP_TAR=""
+TMP_EXTRACT=""
+TMP_ENV_BACKUP=""
+cleanup() {
+  [[ -n "$TMP_TAR" && -f "$TMP_TAR" ]] && rm -f "$TMP_TAR"
+  [[ -n "$TMP_EXTRACT" && -d "$TMP_EXTRACT" ]] && rm -rf "$TMP_EXTRACT"
+  [[ -n "$TMP_ENV_BACKUP" && -f "$TMP_ENV_BACKUP" ]] && rm -f "$TMP_ENV_BACKUP"
+  return 0
+}
+trap cleanup EXIT
+
 # ---------------- 全局配置 ----------------
 REPO="yoorme/squad-signup"
 BRANCH="${BRANCH:-main}"
@@ -216,48 +229,79 @@ download_dist() {
   return 1
 }
 
+# 原子替换目录：旧目录改名 .old 保留 → 移入新目录 → 全部成功后清理 .old；
+# 移入失败自动回滚旧版本。任意时刻中断都保证「旧版或新版至少一个完整可用」，
+# 中断后重跑本脚本即可继续（auto 模式会把 .old 残留也识别为已安装）
+replace_dir() {
+  local src="$1" dst="$2"
+  local old="${dst}.old"
+  if [[ -e "$dst" ]]; then
+    rm -rf "$old"
+    mv "$dst" "$old"
+  fi
+  if mv "$src" "$dst"; then
+    rm -rf "$old"
+    return 0
+  fi
+  # 移入失败：回滚旧版本
+  if [[ -e "$old" ]]; then
+    rm -rf "$dst"
+    mv "$old" "$dst" || die "严重：回滚失败，请手动检查 $INSTALL_DIR 目录"
+  fi
+  return 1
+}
+
+# 恢复 .env 备份（无备份则跳过）
+restore_env_backup() {
+  if [[ -n "$TMP_ENV_BACKUP" ]]; then
+    cp "$TMP_ENV_BACKUP" "$INSTALL_DIR/.env"
+    rm -f "$TMP_ENV_BACKUP"
+    TMP_ENV_BACKUP=""
+  fi
+}
+
 fetch_dist() {
   log "下载预构建产物..."
-  local tmp_tar="/tmp/squad-signup-dist.tar.gz"
+  TMP_TAR="/tmp/squad-signup-dist.tar.gz"
 
-  if ! download_dist "$tmp_tar"; then
+  if ! download_dist "$TMP_TAR"; then
     die "下载产物失败。可能原因：
   1. GitHub Actions 还在构建中（查看：https://github.com/${REPO}/actions）
   2. 网络问题——国内服务器可设置镜像加速：
      MIRROR_URL=https://ghproxy.com/ bash install.sh
-  3. 镜像不可用——已自动回退 GitHub 原生仍失败"
+  3. 镜像不可用——已自动回退 GitHub 原生仍失败
+  （旧版本文件未受影响，可继续运行当前版本，稍后重试更新）"
   fi
-  ok "产物下载完成（$(du -h "$tmp_tar" | cut -f1)）"
 
-  # 解压到临时目录，再移动到目标位置（保留已有的 .env）
-  local tmp_extract; tmp_extract=$(mktemp -d)
-  tar -xzf "$tmp_tar" -C "$tmp_extract"
-  rm -f "$tmp_tar"
+  # 校验下载完整性：有效 gzip，防止半截文件进入替换流程
+  gzip -t "$TMP_TAR" 2>/dev/null || die "下载的产物不是有效的 gzip（可能下载中断），请重试"
+  ok "产物下载完成（$(du -h "$TMP_TAR" | cut -f1)）"
+
+  # 解压到临时目录，校验关键文件无误后再替换，隔离损坏产物的风险
+  TMP_EXTRACT=$(mktemp -d)
+  tar -xzf "$TMP_TAR" -C "$TMP_EXTRACT"
+  rm -f "$TMP_TAR"; TMP_TAR=""
+  [[ -f "$TMP_EXTRACT/standalone/server.js" ]] || die "产物中缺少 standalone/server.js，产物不完整"
+  [[ -d "$TMP_EXTRACT/prisma" ]] || die "产物中缺少 prisma 目录，产物不完整"
 
   # 确保 INSTALL_DIR 存在
   mkdir -p "$INSTALL_DIR"
 
   # 备份 .env（如果存在）
-  local env_backup=""
   if [[ -f "$INSTALL_DIR/.env" ]]; then
-    env_backup=$(mktemp)
-    cp "$INSTALL_DIR/.env" "$env_backup"
+    TMP_ENV_BACKUP=$(mktemp)
+    cp "$INSTALL_DIR/.env" "$TMP_ENV_BACKUP"
   fi
 
-  # 清除旧的 standalone/prisma（保留 .env/.deploy.conf）
-  rm -rf "$INSTALL_DIR/standalone" "$INSTALL_DIR/prisma"
-
-  # 移动新产物
-  mv "$tmp_extract/standalone" "$INSTALL_DIR/standalone"
-  mv "$tmp_extract/prisma" "$INSTALL_DIR/prisma"
-  rm -rf "$tmp_extract"
-
-  # 恢复 .env
-  if [[ -n "$env_backup" ]]; then
-    cp "$env_backup" "$INSTALL_DIR/.env"
-    rm -f "$env_backup"
+  # 原子替换（保留 .env/.deploy.conf/uploads）
+  if ! replace_dir "$TMP_EXTRACT/standalone" "$INSTALL_DIR/standalone" \
+     || ! replace_dir "$TMP_EXTRACT/prisma" "$INSTALL_DIR/prisma"; then
+    restore_env_backup
+    die "产物替换失败，已自动回滚到旧版本。旧版可正常启动，稍后重试更新即可"
   fi
+  rm -rf "$TMP_EXTRACT"; TMP_EXTRACT=""
 
+  restore_env_backup
   ok "产物已解压到 $INSTALL_DIR"
 
   # 上传文件持久目录（独立于 standalone 产物，版本更新不丢图）
@@ -478,6 +522,7 @@ setup_nohup() {
   cat > "$INSTALL_DIR/start.sh" <<EOF
 #!/usr/bin/env bash
 cd "$INSTALL_DIR" || exit 1
+mkdir -p logs
 if [ -f .pid ]; then
   old_pid=\$(cat .pid 2>/dev/null)
   if [ -n "\$old_pid" ] && kill -0 "\$old_pid" 2>/dev/null; then
@@ -752,7 +797,12 @@ main() {
   [[ "$action" == "uninstall" ]] && { do_uninstall; exit 0; }
 
   if [[ "$action" == "auto" ]]; then
-    [[ -d "$INSTALL_DIR/standalone" ]] && action="update" || action="install"
+    # standalone.old 残留 = 上次更新在替换阶段被中断，同样按更新处理（重跑即恢复）
+    if [[ -d "$INSTALL_DIR/standalone" || -d "$INSTALL_DIR/standalone.old" ]]; then
+      action="update"
+    else
+      action="install"
+    fi
   fi
 
   case "$action" in
