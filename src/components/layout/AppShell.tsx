@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode } from "react";
+import { prefixDisplayName } from "@/lib/constants";
 
 interface NavItem {
   href: string;
@@ -16,10 +17,13 @@ interface AppShellProps {
   // 导航项由 (app)/layout.tsx 统一构造（含未读角标），此处不再提供默认值
   navItems: NavItem[];
   showAdmin?: boolean;
+  // 战队名称前缀（战队管理中配置），用于侧边栏标识展示
+  teamPrefix?: string;
 }
 
-export function AppShell({ children, navItems, showAdmin }: AppShellProps) {
+export function AppShell({ children, navItems, showAdmin, teamPrefix }: AppShellProps) {
   const pathname = usePathname();
+  const displayName = prefixDisplayName(teamPrefix ?? "");
 
   const adminItem: NavItem = {
     href: "/admin",
@@ -57,22 +61,35 @@ export function AppShell({ children, navItems, showAdmin }: AppShellProps) {
         id="desktop-nav"
       >
         <div style={{ padding: "12px 12px 24px", display: "flex", alignItems: "center", gap: 8 }}>
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 6,
-              background: "linear-gradient(135deg, var(--win-accent), var(--win-accent-pressed))",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "white",
-              fontWeight: 700,
-              fontSize: 14,
-            }}
-          >
-            MMR
-          </div>
+          {displayName ? (
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 6,
+                background: "linear-gradient(135deg, var(--win-accent), var(--win-accent-pressed))",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "white",
+                fontWeight: 700,
+                fontSize: displayName.length > 3 ? 11 : 14,
+                flexShrink: 0,
+              }}
+            >
+              {displayName}
+            </div>
+          ) : (
+            // 无前缀时用战队图标（与管理后台配置的网页图标一致）
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src="/favicon.ico"
+              alt="战队图标"
+              width={32}
+              height={32}
+              style={{ borderRadius: 6, imageRendering: "pixelated", flexShrink: 0 }}
+            />
+          )}
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: "var(--win-text)" }}>战队报名</div>
             <div style={{ fontSize: 11, color: "var(--win-text-tertiary)" }}>三角洲行动</div>

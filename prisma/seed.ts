@@ -1,5 +1,4 @@
-import { PrismaClient, Role, AbilityCategory } from "@prisma/client";
-import bcrypt from "bcryptjs";
+import { PrismaClient, AbilityCategory } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -8,24 +7,23 @@ async function main() {
   // 首次安装时表为空 → 正常插入
   // 更新时表非空 → 整个表跳过（管理员删除的干员/标签不会被复活）
 
-  // 1. 初始管理员（仅当系统中没有任何管理员时才创建）
-  const adminUsername = process.env.INITIAL_ADMIN_USERNAME ?? "MMR丨Admin";
-  const adminPassword = process.env.INITIAL_ADMIN_PASSWORD ?? "admin123456";
-
-  const adminCount = await prisma.user.count({ where: { role: Role.ADMIN } });
-  if (adminCount === 0) {
-    const passwordHash = await bcrypt.hash(adminPassword, 10);
-    await prisma.user.create({
-      data: {
-        username: adminUsername,
-        nickname: adminUsername.replace(/^MMR丨/, ""),
-        passwordHash,
-        role: Role.ADMIN,
-      },
+  // 0. 站点设置（战队前缀）
+  // TEAM_PREFIX 由 install.sh 首次安装时询问并写入 .env（默认空 = 无前缀）。
+  // 仅在「全新库」（无任何用户）时创建设置行；存量老库的前缀已由迁移
+  // 20260821000000_add_site_setting 的回填 SQL 从历史用户名推导写入。
+  // 注意：不再创建任何默认账户 —— 初始管理员在首次登录页面「系统初始化」中创建。
+  const teamPrefix = process.env.TEAM_PREFIX ?? "";
+  const settingCount = await prisma.siteSetting.count();
+  const userCount = await prisma.user.count();
+  if (settingCount === 0 && userCount === 0) {
+    await prisma.siteSetting.create({
+      data: { id: "global", teamPrefix },
     });
-    console.log(`✓ 初始管理员已创建: ${adminUsername} / ${adminPassword}`);
+    console.log(`✓ 战队前缀已初始化: ${teamPrefix || "（无前缀）"}`);
+  } else if (settingCount === 0) {
+    console.log("✓ 检测到已有用户数据，站点设置保持默认（前缀可在管理后台「战队管理」中配置）");
   } else {
-    console.log(`✓ 管理员已存在（${adminCount} 个），跳过创建`);
+    console.log("✓ 站点设置已存在，跳过");
   }
 
   // 2. 能力 - 步兵方向（表非空则跳过，避免复活已删除项）

@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
-import { NAME_PREFIX } from "@/lib/constants";
 import { Loading } from "@/components/ui/StateView";
 
 interface Ability { id: string; name: string; category: "INFANTRY" | "VEHICLE"; sortOrder: number; }
@@ -17,6 +16,7 @@ interface MyInfo {
   nickname: string;
   role: "ADMIN" | "MEMBER";
   createdAt: string;
+  teamPrefix: string;
   abilities: Ability[];
   duties: Duty[];
   operators: Operator[];
@@ -90,7 +90,7 @@ export default function MePage() {
     }
     if (await patch({ nickname: tempNickname.trim() })) {
       // 同步刷新 session 中的用户名，使导航栏等处立即显示新昵称
-      await update({ name: NAME_PREFIX + tempNickname.trim() });
+      await update({ name: (info?.teamPrefix ?? "") + tempNickname.trim() });
       setEditingNickname(false);
     }
   };
@@ -192,15 +192,17 @@ export default function MePage() {
             {editingNickname ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1 }}>
                 <div style={{ display: "flex", flex: 1, maxWidth: 320 }}>
-                  <span
-                    className="win-input"
-                    style={{ width: "auto", borderRight: "none", borderRadius: "4px 0 0 4px", background: "var(--win-bg-hover)", color: "var(--win-text-tertiary)" }}
-                  >
-                    {NAME_PREFIX}
-                  </span>
+                  {!!info.teamPrefix && (
+                    <span
+                      className="win-input"
+                      style={{ width: "auto", borderRight: "none", borderRadius: "4px 0 0 4px", background: "var(--win-bg-hover)", color: "var(--win-text-tertiary)" }}
+                    >
+                      {info.teamPrefix}
+                    </span>
+                  )}
                   <input
                     className="win-input"
-                    style={{ borderRadius: "0 4px 4px 0" }}
+                    style={{ borderRadius: info.teamPrefix ? "0 4px 4px 0" : undefined }}
                     value={tempNickname}
                     onChange={(e) => setTempNickname(e.target.value)}
                     autoFocus

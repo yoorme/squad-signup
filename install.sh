@@ -20,6 +20,10 @@
 #   非交互（自动化部署）：
 #     DATABASE_URL=... DIRECT_URL=... NEXTAUTH_URL=https://... \
 #       curl -fsSL ... | NONINTERACTIVE=1 bash
+#     可选：PORT=8080（服务端口，默认 3000）
+#           TEAM_PREFIX=XX丨（战队名称前缀，默认空 = 无前缀，
+#           首次安装时写入数据库，之后在管理后台「战队管理」中修改）
+#     注意：不创建任何默认账户；初始管理员在首次访问登录页时创建
 # ============================================================================
 
 set -euo pipefail
@@ -282,14 +286,12 @@ configure_env() {
   fi
 
   log "配置环境变量（.env）"
-  local db_url direct_url auth_secret admin_user admin_pass site_url trust_host port
+  local db_url direct_url auth_secret site_url trust_host port team_prefix
 
   db_url="${DATABASE_URL:-}"
   direct_url="${DIRECT_URL:-}"
   auth_secret="${AUTH_SECRET:-}"
-  admin_user="${INITIAL_ADMIN_USERNAME:-MMR丨Admin}"
-  # 管理员初始密码默认随机生成（而非固定弱密码），用户可在交互中覆盖
-  admin_pass="${INITIAL_ADMIN_PASSWORD:-$(openssl rand -hex 8)}"
+  team_prefix="${TEAM_PREFIX:-}"
   site_url="${NEXTAUTH_URL:-}"
   trust_host="${AUTH_TRUST_HOST:-true}"
   port="${PORT:-$DEFAULT_PORT}"
@@ -307,12 +309,46 @@ EOF
   ask direct_url "迁移用直连串 DIRECT_URL（回车=同上）" "${direct_url:-$db_url}"
   [[ -z "$direct_url" ]] && direct_url="$db_url"
 
+  # 服务端口：在前缀之前询问，默认 3000，校验合法性（1-65535 整数）
+  if is_interactive; then
+    cat >&2 <<EOF
+
+${C_BOLD}服务端口${C_RESET}
+站点监听的端口（systemd 服务与 NEXTAUTH_URL 都用它）。
+直接回车 = 默认 3000；注意避开服务器上已占用的端口。
+
+EOF
+  fi
+  while true; do
+    ask port "服务端口（回车=3000）" "$port"
+    # 不允许前导零（避免八进制歧义），纯数字且 1-65535
+    if [[ "$port" =~ ^(0|[1-9][0-9]{0,4})$ ]] && (( 10#$port >= 1 && 10#$port <= 65535 )); then
+      port=$((10#$port))   # 归一化（去前导零）
+      break
+    fi
+    warn "端口不合法：「$port」必须是 1-65535 的整数"
+    port="${PORT:-$DEFAULT_PORT}"
+    is_interactive || die "PORT 环境变量不合法（需 1-65535 整数）"
+  done
+  export PORT="$port"   # 供 setup_systemd / save_deploy_conf / .env 使用
+
+  # 战队名称前缀：仅在此处（首次安装创建 .env）询问；
+  # 更新时上方「.env 已存在，保留配置」会提前返回，不会再询问
+  if is_interactive; then
+    cat >&2 <<EOF
+
+${C_BOLD}战队名称前缀（可选）${C_RESET}
+用于登录用户名拼接（前缀+昵称，如「XX丨XXX」）与站点标题。
+直接回车 = 不使用前缀；之后可随时在管理后台「战队管理」中修改。
+
+EOF
+  fi
+  ask team_prefix "战队名称前缀（回车=无前缀）" "$team_prefix"
+
   if [[ -z "$auth_secret" ]]; then
     auth_secret=$(openssl rand -base64 32)
     ok "已自动生成 AUTH_SECRET"
   fi
-  ask admin_user "初始管理员用户名" "$admin_user"
-  ask admin_pass "初始管理员密码" "$admin_pass"
   if [[ -z "$site_url" ]]; then
     site_url="http://$(server_ip):${port}"
   fi
@@ -323,14 +359,14 @@ EOF
     echo "DATABASE_URL=$(env_escape "$db_url")"
     echo "DIRECT_URL=$(env_escape "$direct_url")"
     echo "AUTH_SECRET=$(env_escape "$auth_secret")"
-    echo "INITIAL_ADMIN_USERNAME=$(env_escape "$admin_user")"
-    echo "INITIAL_ADMIN_PASSWORD=$(env_escape "$admin_pass")"
+    echo "TEAM_PREFIX=$(env_escape "$team_prefix")"
+    echo "PORT=$(env_escape "$port")"
     echo "NEXTAUTH_URL=$(env_escape "$site_url")"
     echo "AUTH_TRUST_HOST=$(env_escape "$trust_host")"
     echo "UPLOAD_DIR='$INSTALL_DIR/uploads'"
   } > "$env_file"
   chmod 600 "$env_file"
-  ok ".env 已生成"
+  ok ".env 已生成（端口 $port，战队前缀：${team_prefix:-无}）"
   set -a; . "$env_file"; set +a
   save_deploy_conf
 }
@@ -659,6 +695,9 @@ ${C_GREEN}${C_BOLD}✓ squad-signup 安装完成${C_RESET}
   目录：$INSTALL_DIR
   端口：$port
   站点：${NEXTAUTH_URL:-http://$(server_ip):$port}
+
+  首次使用：打开站点后会进入「系统初始化」页面，
+  在那里创建初始管理员账户（不预置任何默认账号密码）。
 
 EOF
   if has_systemd; then

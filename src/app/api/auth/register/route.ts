@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { buildUsername } from "@/lib/constants";
+import { getSiteSettings, buildUsername } from "@/lib/site-settings";
 import { ok, fail, withErrorHandler } from "@/lib/api";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 import bcrypt from "bcryptjs";
@@ -21,10 +21,11 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   if (password.length < 6) {
     return fail("密码至少 6 位");
   }
-  if (nickname.startsWith("MMR丨")) {
-    return fail("昵称无需包含 MMR丨 前缀");
+  const { teamPrefix } = await getSiteSettings();
+  if (teamPrefix && nickname.startsWith(teamPrefix)) {
+    return fail(`昵称无需包含「${teamPrefix}」前缀`);
   }
-  const username = buildUsername(nickname);
+  const username = buildUsername(nickname, teamPrefix);
 
   // 事务：校验邀请码 + 创建用户 + 扣减邀请码
   const result = await prisma.$transaction(async (tx) => {

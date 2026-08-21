@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { prisma } from "@/lib/prisma";
+import { getSiteSettings } from "@/lib/site-settings";
 import { Role } from "@prisma/client";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -15,7 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // 并行查询红点未读数（反连接一次查出，替代原先 total-read 的多查询差值计算）
   // - 公告：已归档的不计入未读红点
   // - 赛事：仅未读的进行中赛事（已归档/已过期不计入），点击进入详情即确认收到
-  const [unreadAnnouncements, unreadEvents] = await Promise.all([
+  const [unreadAnnouncements, unreadEvents, settings] = await Promise.all([
     prisma.announcement.count({
       where: { isArchived: false, reads: { none: { userId: user.id } } },
     }),
@@ -26,6 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         reads: { none: { userId: user.id } },
       },
     }),
+    getSiteSettings(),
   ]);
 
   const navItems = [
@@ -64,7 +66,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ];
 
   return (
-    <AppShell navItems={navItems} showAdmin={isAdmin}>
+    <AppShell navItems={navItems} showAdmin={isAdmin} teamPrefix={settings.teamPrefix}>
       {children}
     </AppShell>
   );

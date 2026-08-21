@@ -13,6 +13,7 @@
 
 ### 管理员端
 
+- **战队管理** — 修改全局战队名称前缀（自动迁移已有用户名）、上传战队图标（网页图标，仅支持 32×32 的 .ico）
 - **标签维护** — 管理能力、职责、干员、赛事性质、赛事名称、分队性质、赛事地图
 - **用户管理** — 查看队员、提升/降级管理员、重置密码、禁用账号
 - **邀请码** — 生成注册邀请码（支持多次使用）、查看使用情况
@@ -32,81 +33,111 @@
 | 密码 | bcryptjs |
 | Markdown | react-markdown + remark-gfm + rehype |
 
-## 快速开始
+## 安装
 
-### 环境要求
+系统**不预置任何默认账号**：首次打开站点时，登录页会显示「系统初始化」表单，在那里创建初始管理员账户。
 
-- Node.js ≥ 20
-- PostgreSQL（本地或远程）
+### 方式一：一键脚本（推荐，Linux 服务器）
 
-### 安装
+在服务器上直接运行（自动识别安装/更新）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/install.sh | bash
+```
+
+安装过程会依次询问：
+
+1. **PostgreSQL 连接串**（数据库需自行准备）
+2. **服务端口**（默认 3000，可自定，校验 1-65535 合法性）
+3. **战队名称前缀**（默认无前缀，用于登录用户名拼接与站点标题，之后可在管理后台修改）
+4. **站点 URL**（默认按服务器 IP 与所选端口生成）
+
+完成后用 `systemctl status squad-signup` 查看状态，浏览器打开站点完成管理员初始化。
+
+非交互自动化部署：
+
+```bash
+DATABASE_URL=... DIRECT_URL=... NEXTAUTH_URL=https://... \
+  NONINTERACTIVE=1 bash install.sh
+# 可选：PORT=8080 TEAM_PREFIX=XX丨
+```
+
+### 方式二：Docker Compose
+
+```bash
+git clone https://github.com/yoorme/squad-signup.git
+cd squad-signup
+bash deploy.sh   # 自动生成随机密钥的 .env 并构建启动
+```
+
+或在 `docker-compose.yml` 同目录自行准备 `.env`（参考下方环境变量表；`POSTGRES_PASSWORD`、`AUTH_SECRET` 必填），然后 `docker compose up -d --build`。对外端口用 `PORT` 控制（默认 3000）。
+
+### 方式三：本地开发
 
 ```bash
 git clone https://github.com/yoorme/squad-signup.git
 cd squad-signup
 npm install
-```
-
-### 配置环境变量
-
-复制 `.env.example` 为 `.env` 并填入真实值：
-
-```bash
-cp .env.example .env
-```
-
-| 变量 | 说明 |
-|------|------|
-| `DATABASE_URL` | PostgreSQL pooled 连接串（运行时用，带 `?pgbouncer=true&sslmode=require`） |
-| `DIRECT_URL` | PostgreSQL 直连串（Prisma 迁移用） |
-| `AUTH_SECRET` | NextAuth 密钥，生成：`openssl rand -base64 32` |
-| `INITIAL_ADMIN_USERNAME` | 初始管理员用户名（首次 seed 创建） |
-| `INITIAL_ADMIN_PASSWORD` | 初始管理员密码 |
-| `NEXTAUTH_URL` | 站点 URL（本地 `http://localhost:3000`） |
-| `AUTH_TRUST_HOST` | 自托管/IP 访问建议 `true` |
-
-### 初始化数据库
-
-```bash
-# 生成 Prisma Client
-npm run postinstall
-
-# 执行迁移
+cp .env.example .env   # 填入本地数据库等配置
 npm run db:migrate
-
-# 写入种子数据（初始管理员 + 默认标签 + 默认地图）
 npm run seed
-```
-
-种子数据包含：
-- 初始管理员账号（按 `.env` 配置）
-- 默认赛事性质：正赛、训练赛、娱乐赛、其他
-- 默认赛事地图：攀升、烬区、风暴眼、临界点、堑壕战、断层、断轨
-
-### 启动开发服务器
-
-```bash
 npm run dev
 ```
 
-访问 [http://localhost:3000](http://localhost:3000)，使用初始管理员账号登录。
+### 方式四：Vercel 等托管平台
 
-## 部署
+Fork 后导入，在 Settings → Environment Variables 配置环境变量（`DATABASE_URL` 用 Neon pooled 串，`DIRECT_URL` 用直连串），构建命令 `npm run build` 会自动执行迁移与种子。
 
-### Vercel
+## 更新
 
-1. Fork 仓库并导入到 Vercel
-2. 在 Settings → Environment Variables 配置上述所有环境变量
-3. `DATABASE_URL` 用 Neon pooled 串，`DIRECT_URL` 用 Neon 直连串
-4. 构建命令 `npm run build` 会自动执行迁移与种子
+服务器上执行（与安装是同一条命令，已有配置会被保留，不会再询问任何问题）：
 
-### 其他平台
-
-需保证构建时能访问到 `DATABASE_URL` 与 `DIRECT_URL`。构建流程：
-
+```bash
+curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/install.sh | bash
 ```
-prisma migrate deploy → tsx prisma/seed.ts → next build
+
+或使用独立的更新脚本（功能等价，仅更新不安装）：
+
+```bash
+bash update.sh
 ```
+
+更新过程说明：
+
+- `.env`、上传的图片与自定义战队图标全部保留，不会丢失
+- 数据库结构变更通过 `prisma migrate deploy` 自动应用
+- 存量部署的战队名称前缀由迁移从历史用户名自动推导写入，无需手动处理
+- 国内服务器下载慢可加镜像前缀：`MIRROR_URL=https://ghproxy.com/ bash update.sh`
+
+## 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `DATABASE_URL` | PostgreSQL 连接串（运行时用） |
+| `DIRECT_URL` | PostgreSQL 直连串（Prisma 迁移用；本地可与上相同） |
+| `AUTH_SECRET` | NextAuth 密钥，生成：`openssl rand -base64 32` |
+| `NEXTAUTH_URL` | 站点 URL（本地 `http://localhost:3000`） |
+| `AUTH_TRUST_HOST` | 自托管/IP 访问建议 `true` |
+| `PORT` | 服务端口（默认 3000） |
+| `TEAM_PREFIX` | 战队名称前缀（首次 seed 时写入数据库，默认空 = 无前缀） |
+| `UPLOAD_DIR` | 上传文件持久目录（默认 `<安装目录>/uploads`） |
+
+初始管理员不在环境变量中配置，见上文「系统初始化」。
+
+## 默认种子数据
+
+首次部署时写入以下默认标签（仅当对应表为空时），均可在管理后台「标签维护」中修改或删除：
+
+| 类别 | 默认内容 |
+|------|----------|
+| 能力（步兵） | 突击、医疗、侦查、正面、机动、狙击、反载 |
+| 能力（载具） | 驾驶、焊工、骇车 |
+| 职责 | 队长、指挥、无 |
+| 赛事性质 | 正赛、训练赛、娱乐赛、其他 |
+| 赛事名称 | 百姓杯 |
+| 分队性质 | 步兵、载具、机动、指挥 |
+| 赛事地图 | 攀升、烬区、风暴眼、临界点、堑壕战、断层、断轨 |
+| 干员 | 蛊、骇爪、深蓝、露娜、蜂医、威龙、乌鲁鲁、疾风、无名、蝶、牧羊人、液氮、比特、银翼 |
 
 ## 项目结构
 
@@ -114,7 +145,7 @@ prisma migrate deploy → tsx prisma/seed.ts → next build
 squad-signup/
 ├── prisma/
 │   ├── schema.prisma          # 数据模型定义
-│   ├── seed.ts                # 种子数据
+│   ├── seed.ts                # 种子数据（默认标签，不含账号）
 │   └── migrations/            # 数据库迁移
 ├── src/
 │   ├── app/
@@ -123,17 +154,21 @@ squad-signup/
 │   │   │   ├── events/        # 赛事列表与详情
 │   │   │   ├── members/       # 队员列表
 │   │   │   ├── me/            # 个人信息
-│   │   │   └── admin/         # 管理后台
+│   │   │   └── admin/         # 管理后台（含战队管理）
 │   │   ├── api/               # API 路由
-│   │   ├── login/             # 登录页
-│   │   └── register/          # 注册页
+│   │   ├── login/             # 登录页（含首次部署的系统初始化）
+│   │   ├── register/          # 注册页
+│   │   └── favicon.ico/       # 动态网页图标路由（战队管理中上传的图标）
 │   ├── components/
 │   │   ├── events/            # 赛事相关组件
 │   │   ├── layout/            # 布局组件（AppShell）
 │   │   └── ui/                # 通用 UI（Toast、Modal、Markdown 等）
-│   ├── lib/                   # 工具函数（prisma、auth、api、constants）
+│   ├── lib/                   # 工具函数（prisma、auth、site-settings 等）
 │   └── auth.ts                # NextAuth 配置
-└── package.json
+├── install.sh                 # 一键安装/更新脚本
+├── update.sh                  # 更新脚本（预构建产物模式）
+├── deploy.sh                  # Docker 部署脚本
+└── docker-compose.yml
 ```
 
 ## 常用脚本
@@ -144,7 +179,7 @@ squad-signup/
 | `npm run build` | 构建（含迁移与种子） |
 | `npm run start` | 启动生产服务器 |
 | `npm run lint` | 代码检查 |
-| `npm run seed` | 写入种子数据 |
+| `npm run seed` | 写入种子数据（幂等） |
 | `npm run db:migrate` | 创建并应用迁移 |
 | `npm run db:push` | 直接同步 schema 到数据库 |
 | `npm run db:studio` | 打开 Prisma Studio |

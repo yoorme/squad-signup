@@ -39,12 +39,10 @@ echo ""
 echo "==> [3/7] 创建 .env 配置文件..."
 if [ -f ".env" ]; then
   echo ".env 已存在，跳过创建（如需重置请先删除 .env）"
-  GENERATED_ADMIN_PASSWORD=""
 else
   # 所有密钥现场随机生成，不落仓库、不复用默认值
   GENERATED_DB_PASSWORD=$(openssl rand -hex 16)
   GENERATED_AUTH_SECRET=$(openssl rand -base64 32)
-  GENERATED_ADMIN_PASSWORD=$(openssl rand -hex 8)
   # 自动探测服务器公网 IP（失败则留待手动修改）
   SERVER_IP=$(curl -fsSL --max-time 5 ifconfig.me 2>/dev/null || echo "YOUR_SERVER_IP")
   cat > .env << EOF
@@ -56,9 +54,11 @@ POSTGRES_DB=squad_signup
 # NextAuth 密钥（已随机生成；轮换会使所有用户重新登录）
 AUTH_SECRET=${GENERATED_AUTH_SECRET}
 
-# 初始管理员（随机初始密码仅在本脚本末尾显示一次，请立即登录修改）
-INITIAL_ADMIN_USERNAME=MMR丨Admin
-INITIAL_ADMIN_PASSWORD=${GENERATED_ADMIN_PASSWORD}
+# 战队名称前缀（默认空 = 无前缀；之后在管理后台「战队管理」中修改）
+TEAM_PREFIX=
+
+# 服务端口（容器对外暴露端口，默认 3000）
+PORT=3000
 
 # 站点 URL（如探测不准确请手动改为实际 IP/域名）
 NEXTAUTH_URL=http://${SERVER_IP}:3000
@@ -75,18 +75,20 @@ fi
 echo "--- .env 内容（密码已隐藏）---"
 sed -E 's/(PASSWORD|SECRET)=.*/\1=***/' .env
 
-# 4. 检查安全组/防火墙
+# 4. 检查安全组/防火墙（端口取自 .env 的 PORT，默认 3000）
+APP_PORT=$(grep '^PORT=' .env 2>/dev/null | cut -d= -f2)
+APP_PORT="${APP_PORT:-3000}"
 echo ""
-echo "==> [4/7] 检查防火墙..."
+echo "==> [4/7] 检查防火墙（端口 $APP_PORT）..."
 if command -v firewall-cmd &> /dev/null; then
   echo "firewalld 状态: $(firewall-cmd --state 2>&1)"
   echo "已放行端口: $(firewall-cmd --list-ports 2>&1)"
-  echo "尝试放行 3000 端口..."
-  firewall-cmd --permanent --add-port=3000/tcp 2>&1 && firewall-cmd --reload 2>&1 || echo "（需手动放行或安全组已配置）"
+  echo "尝试放行 $APP_PORT 端口..."
+  firewall-cmd --permanent --add-port=${APP_PORT}/tcp 2>&1 && firewall-cmd --reload 2>&1 || echo "（需手动放行或安全组已配置）"
 elif command -v ufw &> /dev/null; then
   echo "ufw 状态: $(ufw status 2>&1)"
 else
-  echo "未检测到 firewalld/ufw，请确保阿里云安全组已放行 3000 端口"
+  echo "未检测到 firewalld/ufw，请确保云安全组已放行 $APP_PORT 端口"
 fi
 
 # 5. 构建并启动
@@ -115,16 +117,11 @@ echo "  部署完成！"
 echo "========================================="
 echo ""
 echo "访问地址: $(grep '^NEXTAUTH_URL=' .env | cut -d= -f2)"
-echo "登录账号: MMR丨Admin"
-if [ -n "${GENERATED_ADMIN_PASSWORD:-}" ]; then
-  echo "登录密码: ${GENERATED_ADMIN_PASSWORD}  （仅本次显示，请立即登录后修改）"
-else
-  echo "登录密码: 使用 .env 中既有配置"
-fi
+echo "首次使用: 打开站点后在「系统初始化」页面创建初始管理员（不预置默认账号密码）"
 echo ""
 echo "如无法访问，请检查："
-echo "1. 阿里云安全组是否放行 3000 端口（TCP 入方向）"
-echo "2. 服务器防火墙是否放行 3000 端口"
+echo "1. 云服务商安全组是否放行 $APP_PORT 端口（TCP 入方向）"
+echo "2. 服务器防火墙是否放行 $APP_PORT 端口"
 echo "3. 查看日志: cd /opt/squad-signup && docker compose logs -f app"
 echo ""
 echo "常用命令："

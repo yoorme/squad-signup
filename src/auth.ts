@@ -3,7 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { buildUsername } from "@/lib/constants";
+import { getSiteSettings, buildUsername } from "@/lib/site-settings";
 
 export const authConfig: NextAuthConfig = {
   session: { strategy: "jwt" },
@@ -18,10 +18,11 @@ export const authConfig: NextAuthConfig = {
         const password = String(credentials?.password ?? "");
         if (!username || !password) return null;
 
-        // 兼容用户输入「昵称」或「MMR丨昵称」
-        const fullUsername = username.startsWith("MMR丨")
+        // 兼容用户输入「昵称」或「前缀+昵称」（前缀为战队管理中配置的全局值）
+        const { teamPrefix } = await getSiteSettings();
+        const fullUsername = teamPrefix && username.startsWith(teamPrefix)
           ? username
-          : buildUsername(username);
+          : buildUsername(username, teamPrefix);
 
         const user = await prisma.user.findUnique({
           where: { username: fullUsername },

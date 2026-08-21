@@ -27,6 +27,12 @@ export default function AdminHome() {
       icon: "📢",
     },
     {
+      href: "/admin/team",
+      title: "战队管理",
+      desc: "修改战队名称前缀、上传战队图标（网页图标）",
+      icon: "🛡️",
+    },
+    {
       href: "/admin/events",
       title: "赛事管理",
       desc: "创建赛事、修改赛事标签、地图与分队性质",

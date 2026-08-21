@@ -15,7 +15,7 @@ datasource db {
 
 model User {
   id           String   @id @default(cuid())
-  username     String   @unique // 完整用户名 MMR丨{nickname}
+  username     String   @unique // 完整用户名 = 战队前缀 + 昵称（前缀可为空）
   nickname     String // 昵称部分（不含前缀）
   passwordHash String
   role         Role     @default(MEMBER)
@@ -39,6 +39,17 @@ model User {
 enum Role {
   ADMIN
   MEMBER
+}
+
+// ============ 站点设置（战队管理）============
+// 单行表：id 固定为 "global"
+// teamPrefix 为空表示无前缀；存量部署的前缀由迁移回填 SQL 从历史用户名推导写入
+model SiteSetting {
+  id            String    @id @default("global")
+  teamPrefix    String    @default("") // 战队名称前缀（如 "XX丨"），用于用户名/标题/侧边栏
+  iconName      String? // 自定义战队图标文件名（UPLOAD_DIR 内），null = 使用默认图标
+  iconUpdatedAt DateTime? // 图标更新时间（用作 ETag，便于浏览器刷新缓存）
+  updatedAt     DateTime  @updatedAt
 }
 
 // ============ 能力 / 职责 / 干员 ============

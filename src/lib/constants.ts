@@ -1,9 +1,10 @@
 // 全局常量与工具函数（同构模块：会被 client 组件引用，禁止引入 node 内置模块）
-export const NAME_PREFIX = "MMR丨";
+// 战队名称前缀已改为数据库配置（SiteSetting.teamPrefix），由管理后台「战队管理」维护
 
-// 拼接完整用户名
-export function buildUsername(nickname: string): string {
-  return `${NAME_PREFIX}${nickname}`;
+// 从前缀中提取「战队展示名」：去掉尾部的分隔符（如 "XX丨" → "XX"）
+// 用于站点标题（XX战队报名系统）与侧边栏标识；空前缀返回空字符串
+export function prefixDisplayName(prefix: string): string {
+  return prefix.replace(/[丨|｜/\\·．.．\-—_~\s]+$/u, "").trim();
 }
 
 // 时间格式化：YYYY-MM-DD HH:mm
