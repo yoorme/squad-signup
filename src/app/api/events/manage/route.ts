@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
 import { buildEventTitle } from "@/lib/constants";
+import { parseEventTimeLocal } from "@/lib/event-time";
 
 // 删除赛事（管理员）
 export const DELETE = withErrorHandler(async (req: NextRequest) => {
@@ -53,7 +54,7 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
     if (typeof eventTimeRaw !== "string" || eventTimeRaw.trim() === "") {
       return fail("赛事时间不能为空");
     }
-    eventDate = new Date(eventTimeRaw);
+    eventDate = parseEventTimeLocal(eventTimeRaw);
     if (isNaN(eventDate.getTime())) {
       return fail("赛事时间格式无效");
     }
@@ -98,6 +99,17 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
       const sn = snMap.get(su.natureId);
       if (!sn) return fail("分队性质不存在");
       if (sn.disabled) return fail(`分队性质「${sn.name}」已被禁用，请选择其他标签`);
+    }
+
+    // 校验每个分队确实属于当前赛事，防止跨赛事越权修改
+    const squadIds = squadUpdates.map((su) => su.id);
+    const ownedSquads = await prisma.squad.findMany({
+      where: { id: { in: squadIds }, eventId: id },
+      select: { id: true },
+    });
+    const ownedSet = new Set(ownedSquads.map((s) => s.id));
+    for (const su of squadUpdates) {
+      if (!ownedSet.has(su.id)) return fail("分队不存在或不属于该赛事");
     }
   }
 

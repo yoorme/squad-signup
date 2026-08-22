@@ -1,5 +1,5 @@
 # ============ 阶段 1：依赖安装 ============
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 
 # 仅复制 package 文件，利用 Docker 层缓存
@@ -13,7 +13,7 @@ RUN npm ci
 RUN npx prisma generate
 
 # ============ 阶段 2：构建 ============
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -24,7 +24,7 @@ COPY . .
 RUN npx next build --webpack
 
 # ============ 阶段 3：运行时 ============
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

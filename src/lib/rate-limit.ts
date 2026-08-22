@@ -53,10 +53,15 @@ export function rateLimit(
   return { success: true };
 }
 
-// 从请求中提取客户端 IP（反向代理后取 X-Forwarded-For 第一个值）
+// 从请求中提取客户端 IP。
+// 只有 TRUST_PROXY=true 时才信任 X-Forwarded-For，否则使用 x-real-ip 兜底，
+// 防止客户端伪造 X-Forwarded-For 绕过限流。
+const TRUST_PROXY = process.env.TRUST_PROXY === "true";
+
 export function clientIp(req: Request): string {
-  const headers = req.headers;
-  const xff = headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return headers.get("x-real-ip") ?? "unknown";
+  if (TRUST_PROXY) {
+    const xff = req.headers.get("x-forwarded-for");
+    if (xff) return xff.split(",")[0].trim();
+  }
+  return req.headers.get("x-real-ip") ?? "unknown";
 }

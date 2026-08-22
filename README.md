@@ -135,6 +135,7 @@ bash update.sh
 | `AUTH_SECRET` | NextAuth 密钥，生成：`openssl rand -base64 32` |
 | `NEXTAUTH_URL` | 站点 URL（本地 `http://localhost:3000`） |
 | `AUTH_TRUST_HOST` | 自托管/IP 访问建议 `true` |
+| `TRUST_PROXY` | 是否信任反向代理的 `X-Forwarded-For`（用于登录/注册限流）；反向代理后建议 `true`，直接暴露建议 `false` |
 | `PORT` | 服务端口（默认 3000） |
 | `TEAM_PREFIX` | 战队缩写（首次 seed 时规范化为「缩写+固定分隔符丨」写入数据库，默认空 = 无前缀） |
 | `UPLOAD_DIR` | 上传文件持久目录（默认 `<安装目录>/uploads`） |

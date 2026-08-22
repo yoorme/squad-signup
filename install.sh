@@ -52,7 +52,7 @@ BRANCH="${BRANCH:-main}"
 # 预构建产物下载地址（GitHub Release，由 GitHub Actions 自动构建上传）
 DIST_URL="https://github.com/${REPO}/releases/download/latest/dist.tar.gz"
 DEFAULT_PORT="${PORT:-3000}"
-MIN_NODE_MAJOR=20
+MIN_NODE_MAJOR=24
 NVM_VERSION="v0.39.7"
 # 国内加速镜像前缀（可选）：设置为 https://ghproxy.com/ 等可加速 GitHub Release 下载
 # 下载时优先用镜像，失败自动回退到 GitHub 原生地址
@@ -411,7 +411,7 @@ configure_env() {
   fi
 
   log "配置环境变量（.env）"
-  local db_url direct_url auth_secret site_url trust_host port team_prefix
+  local db_url direct_url auth_secret site_url trust_host trust_proxy port team_prefix
 
   db_url="${DATABASE_URL:-}"
   direct_url="${DIRECT_URL:-}"
@@ -419,6 +419,7 @@ configure_env() {
   team_prefix="${TEAM_PREFIX:-}"
   site_url="${NEXTAUTH_URL:-}"
   trust_host="${AUTH_TRUST_HOST:-true}"
+  trust_proxy="${TRUST_PROXY:-true}"
   port="${PORT:-$DEFAULT_PORT}"
 
   if is_interactive && [[ -z "$db_url" ]]; then
@@ -529,6 +530,7 @@ EOF
     echo "PORT=$(env_escape "$port")"
     echo "NEXTAUTH_URL=$(env_escape "$site_url")"
     echo "AUTH_TRUST_HOST=$(env_escape "$trust_host")"
+    echo "TRUST_PROXY=$(env_escape "$trust_proxy")"
     echo "UPLOAD_DIR='$INSTALL_DIR/uploads'"
   } > "$env_file"
   chmod 600 "$env_file"

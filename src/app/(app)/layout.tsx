@@ -1,17 +1,16 @@
-import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { prisma } from "@/lib/prisma";
 import { getSiteSettings } from "@/lib/site-settings";
 import { prefixDisplayName } from "@/lib/constants";
 import { Role } from "@prisma/client";
+import { getSessionUser } from "@/lib/auth-server";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth();
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     redirect("/login");
   }
-  const user = session.user;
   const isAdmin = user.role === Role.ADMIN;
 
   // 并行查询红点未读数（反连接一次查出，替代原先 total-read 的多查询差值计算）

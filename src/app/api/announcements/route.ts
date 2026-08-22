@@ -147,6 +147,8 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
   const isArchived = body.isArchived !== undefined ? Boolean(body.isArchived) : undefined;
 
   if (!id) return fail("缺少公告 ID");
+  if (title !== undefined && title === "") return fail("标题不能为空");
+  if (contentMarkdown !== undefined && contentMarkdown.trim() === "") return fail("内容不能为空");
 
   // 纯归档/恢复操作：直接更新，无需走图片处理
   if (isArchived !== undefined && title === undefined && contentMarkdown === undefined && images === undefined) {

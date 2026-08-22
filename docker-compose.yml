@@ -50,6 +50,8 @@ services:
       NEXTAUTH_URL: "${NEXTAUTH_URL:-http://localhost:3000}"
       # 信任 Host（用 IP 访问必须开启；用 HTTPS 域名访问可设为 false）
       AUTH_TRUST_HOST: "${AUTH_TRUST_HOST:-true}"
+      # 信任反向代理的 X-Forwarded-For（用于限流；直接暴露时建议 false）
+      TRUST_PROXY: "${TRUST_PROXY:-true}"
       # 上传文件持久目录（独立卷，重建容器不丢图）
       UPLOAD_DIR: /app/uploads
     volumes:

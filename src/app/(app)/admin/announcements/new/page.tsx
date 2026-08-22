@@ -103,7 +103,7 @@ export default function AnnouncementEditorPage() {
         const re = new RegExp(`\\n*!\\[[^\\]]*\\]\\(${escaped}\\)\\n*`, "g");
         return prev.replace(re, "\n");
       });
-      toast("已移除（保存后生效）", "success");
+      toast("已移除，保存公告后删除磁盘文件", "success");
     } finally {
       setDeletingPath(null);
     }
@@ -233,7 +233,7 @@ export default function AnnouncementEditorPage() {
         {/* 图片上传 */}
         <div className="win-card" style={{ padding: 16 }}>
           <label className="win-label">
-            图片（最多 {MAX_IMAGES} 张，每张不超过 5MB；点击缩略图可预览，左上角复制 Markdown，右上角彻底删除）
+            图片（最多 {MAX_IMAGES} 张，每张不超过 5MB；点击缩略图可预览，左上角复制 Markdown，右上角从编辑器移除）
           </label>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {images.map((img, idx) => (
@@ -278,10 +278,10 @@ export default function AnnouncementEditorPage() {
                     <path d="M12 19V5M5 12l7-7 7 7" />
                   </svg>
                 </button>
-                {/* 右上角：彻底删除按钮（叉号，删盘 + 清 markdown） */}
+                {/* 右上角：从编辑器移除按钮（叉号，清 markdown；保存公告时统一删盘） */}
                 <button
                   onClick={() => handleDeleteImage(img.path)}
-                  title="彻底删除（含磁盘文件）"
+                  title="从编辑器移除（保存公告后删除磁盘文件）"
                   disabled={deletingPath === img.path}
                   style={{
                     position: "absolute",

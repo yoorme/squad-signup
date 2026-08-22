@@ -33,6 +33,70 @@ trap cleanup EXIT
 die()  { echo "✗ $*" >&2; exit 1; }
 warn() { echo "! $*" >&2; }
 
+# ---------------- Node.js 版本管理 ----------------
+MIN_NODE_MAJOR=24
+NVM_VERSION="v0.39.7"
+
+need_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+node_major() {
+  node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0
+}
+
+install_node_nvm() {
+  local nvm_dir="$HOME/.nvm"
+  echo "▶ 通过 nvm 安装 Node.js v${MIN_NODE_MAJOR} ..."
+  curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | bash
+  # shellcheck disable=SC1091
+  . "$nvm_dir/nvm.sh"
+  nvm install "${MIN_NODE_MAJOR}"
+  nvm use "${MIN_NODE_MAJOR}"
+  nvm alias default "${MIN_NODE_MAJOR}"
+}
+
+install_node() {
+  if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    if need_cmd apt-get; then
+      echo "▶ 通过 NodeSource 安装 Node.js v${MIN_NODE_MAJOR} (apt) ..."
+      curl -fsSL "https://deb.nodesource.com/setup_${MIN_NODE_MAJOR}.x" | bash -
+      apt-get install -y nodejs
+      return 0
+    elif need_cmd dnf; then
+      curl -fsSL "https://rpm.nodesource.com/setup_${MIN_NODE_MAJOR}.x" | bash -
+      dnf install -y nodejs
+      return 0
+    elif need_cmd yum; then
+      curl -fsSL "https://rpm.nodesource.com/setup_${MIN_NODE_MAJOR}.x" | bash -
+      yum install -y nodejs
+      return 0
+    fi
+  fi
+  install_node_nvm
+}
+
+ensure_node() {
+  if need_cmd node; then
+    local major; major=$(node_major)
+    if (( major >= MIN_NODE_MAJOR )); then
+      echo "✓ Node.js $(node -v) 已就绪"
+      return 0
+    fi
+    warn "Node.js $(node -v) 版本过低，需 >= v${MIN_NODE_MAJOR}，开始升级..."
+  else
+    warn "未检测到 Node.js，开始安装..."
+  fi
+  install_node
+  hash -r 2>/dev/null || true
+  if ! need_cmd node; then
+    die "Node.js 安装失败，请手动安装 Node.js v${MIN_NODE_MAJOR}+ 后重试"
+  fi
+  local major2; major2=$(node_major)
+  if (( major2 < MIN_NODE_MAJOR )); then
+    die "安装后 Node.js 版本仍为 $(node -v)，不满足 v${MIN_NODE_MAJOR}+ 要求"
+  fi
+  echo "✓ Node.js $(node -v) 已安装"
+}
+
 # ================================================================
 # 前置检查（失败立即退出，不浪费时间）
 # ================================================================
@@ -52,15 +116,12 @@ if [[ -f "$INSTALL_DIR/.deploy.conf" ]]; then
   fi
 fi
 
-# 检查 node 可用（nvm 装的 node 可能需要 source nvm.sh）
-if ! command -v node >/dev/null 2>&1; then
-  if [[ -f "$HOME/.nvm/nvm.sh" ]]; then
-    # shellcheck disable=SC1091
-    . "$HOME/.nvm/nvm.sh"
-    nvm use 20 2>/dev/null || nvm use default 2>/dev/null || true
-  fi
+# 检查/升级 Node 到 >=24（nvm 装的 node 可能需要 source nvm.sh）
+if ! command -v node >/dev/null 2>&1 && [[ -f "$HOME/.nvm/nvm.sh" ]]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.nvm/nvm.sh"
 fi
-command -v node >/dev/null 2>&1 || die "找不到 node，请先安装 Node.js v20+ 或 source nvm"
+ensure_node
 NODE_BIN=$(command -v node)
 
 # 检查磁盘空间（产物约 50MB + 解压 + node_modules，至少需要 500MB）
@@ -236,6 +297,10 @@ mkdir -p "$INSTALL_DIR/uploads"
 if ! grep -q '^UPLOAD_DIR=' "$INSTALL_DIR/.env" 2>/dev/null; then
   echo "UPLOAD_DIR='$INSTALL_DIR/uploads'" >> "$INSTALL_DIR/.env"
   echo "✓ 已向 .env 补充 UPLOAD_DIR 配置"
+fi
+if ! grep -q '^TRUST_PROXY=' "$INSTALL_DIR/.env" 2>/dev/null; then
+  echo "TRUST_PROXY='true'" >> "$INSTALL_DIR/.env"
+  echo "✓ 已向 .env 补充 TRUST_PROXY 配置"
 fi
 echo "✓ 产物已更新"
 

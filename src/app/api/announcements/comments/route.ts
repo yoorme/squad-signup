@@ -3,11 +3,25 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
 
+async function assertAnnouncementVisible(id: string, role: string) {
+  const announcement = await prisma.announcement.findUnique({
+    where: { id },
+    select: { id: true, isArchived: true },
+  });
+  if (!announcement || (announcement.isArchived && role !== "ADMIN")) {
+    return null;
+  }
+  return announcement;
+}
+
 // 获取某公告的留言
 export const GET = withErrorHandler(async (req: NextRequest) => {
   const user = await requireUser();
   const announcementId = req.nextUrl.searchParams.get("announcementId");
   if (!announcementId) return fail("缺少公告 ID");
+
+  const announcement = await assertAnnouncementVisible(announcementId, user.role);
+  if (!announcement) return fail("公告不存在", 404);
 
   const comments = await prisma.announcementComment.findMany({
     where: { announcementId },
@@ -32,6 +46,9 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   if (!announcementId) return fail("缺少公告 ID");
   if (!content) return fail("留言不能为空");
   if (content.length > 500) return fail("留言不能超过 500 字");
+
+  const announcement = await assertAnnouncementVisible(announcementId, user.role);
+  if (!announcement) return fail("公告不存在", 404);
 
   const comment = await prisma.announcementComment.create({
     data: { announcementId, userId: user.id, content },

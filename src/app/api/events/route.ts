@@ -5,6 +5,7 @@ import { requireUser, requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
 import { calculateSquadCount, isValidSquadCount, buildEventTitle } from "@/lib/constants";
 import { autoArchiveExpiredEvents } from "@/lib/event-auto-archive";
+import { parseEventTimeLocal } from "@/lib/event-time";
 
 // 事件详情查询的完整 payload 类型（含 squads/registrations/user 关联）
 type EventDetailPayload = Prisma.EventGetPayload<{
@@ -325,7 +326,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     if (sn.disabled) return fail(`分队性质「${sn.name}」已被禁用，请选择其他标签`);
   }
 
-  const eventDate = new Date(eventTime);
+  const eventDate = parseEventTimeLocal(eventTime);
   if (isNaN(eventDate.getTime())) return fail("时间格式错误");
 
   // 对手校验：必填，trim 后非空

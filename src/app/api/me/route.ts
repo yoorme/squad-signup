@@ -1,9 +1,28 @@
 import { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
 import { getSiteSettings, buildUsername } from "@/lib/site-settings";
 import bcrypt from "bcryptjs";
+
+async function validateTagIds(
+  tx: Prisma.TransactionClient,
+  model: "ability" | "duty" | "operator",
+  ids: string[]
+): Promise<string[]> {
+  const uniqueIds = [...new Set(ids)];
+  let count = 0;
+  if (model === "ability") {
+    count = await tx.ability.count({ where: { id: { in: uniqueIds }, disabled: false } });
+  } else if (model === "duty") {
+    count = await tx.duty.count({ where: { id: { in: uniqueIds }, disabled: false } });
+  } else {
+    count = await tx.operator.count({ where: { id: { in: uniqueIds }, disabled: false } });
+  }
+  if (count !== uniqueIds.length) throw new Error("包含无效或已禁用的标签");
+  return uniqueIds;
+}
 
 // 获取当前用户信息
 export const GET = withErrorHandler(async () => {
@@ -87,30 +106,33 @@ export const PATCH = withErrorHandler(async (req: NextRequest) => {
 
       // 更新能力
       if (abilityIds !== undefined) {
+        const validAbilityIds = await validateTagIds(tx, "ability", abilityIds);
         await tx.userAbility.deleteMany({ where: { userId: user.id } });
-        if (abilityIds.length > 0) {
+        if (validAbilityIds.length > 0) {
           await tx.userAbility.createMany({
-            data: abilityIds.map((abilityId: string) => ({ userId: user.id, abilityId })),
+            data: validAbilityIds.map((abilityId: string) => ({ userId: user.id, abilityId })),
           });
         }
       }
 
       // 更新职责
       if (dutyIds !== undefined) {
+        const validDutyIds = await validateTagIds(tx, "duty", dutyIds);
         await tx.userDuty.deleteMany({ where: { userId: user.id } });
-        if (dutyIds.length > 0) {
+        if (validDutyIds.length > 0) {
           await tx.userDuty.createMany({
-            data: dutyIds.map((dutyId: string) => ({ userId: user.id, dutyId })),
+            data: validDutyIds.map((dutyId: string) => ({ userId: user.id, dutyId })),
           });
         }
       }
 
       // 更新干员
       if (operatorIds !== undefined) {
+        const validOperatorIds = await validateTagIds(tx, "operator", operatorIds);
         await tx.userOperator.deleteMany({ where: { userId: user.id } });
-        if (operatorIds.length > 0) {
+        if (validOperatorIds.length > 0) {
           await tx.userOperator.createMany({
-            data: operatorIds.map((operatorId: string) => ({
+            data: validOperatorIds.map((operatorId: string) => ({
               userId: user.id,
               operatorId,
             })),
@@ -132,4 +154,5 @@ const VALIDATION_ERRORS = new Set([
   "昵称不能为空",
   "该昵称已被使用",
   "密码至少 6 位",
+  "包含无效或已禁用的标签",
 ]);
