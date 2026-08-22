@@ -9,9 +9,12 @@ import { prefixDisplayName } from "@/lib/constants";
 
 interface LoginFormProps {
   teamPrefix: string;
+  // 图标版本号（iconUpdatedAt 时间戳）：拼在 /favicon.ico?v= 后，
+  // 管理员更换图标后刷新页面即可看到新图标（绕过浏览器缓存）
+  iconVersion: number;
 }
 
-export function LoginForm({ teamPrefix }: LoginFormProps) {
+export function LoginForm({ teamPrefix, iconVersion }: LoginFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/";
@@ -69,35 +72,16 @@ export function LoginForm({ teamPrefix }: LoginFormProps) {
         }}
       >
         <div style={{ textAlign: "center", marginBottom: 24 }}>
-          {displayName ? (
-            <div
-              style={{
-                width: 56,
-                height: 56,
-                borderRadius: 12,
-                background: "linear-gradient(135deg, #0078d4, #005a9e)",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "white",
-                fontWeight: 700,
-                fontSize: displayName.length > 4 ? 14 : 20,
-                marginBottom: 12,
-              }}
-            >
-              {displayName}
-            </div>
-          ) : (
-            // 无前缀时用战队图标作 logo（与管理后台配置的网页图标一致）
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src="/favicon.ico"
-              alt="战队图标"
-              width={56}
-              height={56}
-              style={{ marginBottom: 12, borderRadius: 12, imageRendering: "pixelated" }}
-            />
-          )}
+          {/* 战队图标：始终显示管理后台配置的图标（自定义优先，无则默认）；
+              v= 版本号在更换图标后变化，刷新页面即可绕过浏览器缓存 */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/favicon.ico?v=${iconVersion}`}
+            alt="战队图标"
+            width={56}
+            height={56}
+            style={{ marginBottom: 12, borderRadius: 12, imageRendering: "pixelated" }}
+          />
           <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>
             {displayName}战队报名系统
           </h1>

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # squad-signup 服务器更新脚本（预构建产物模式）
 # 用法：bash update.sh
+#   可选环境变量：ADMIN_NICKNAME / ADMIN_PASSWORD（仅库为空时用于补建初始管理员，
+#                 默认 admin/123456；已有用户则跳过，不会覆盖现有账号）
 #
 # 核心思路：不在服务器上构建！直接下载 GitHub Actions 预构建的产物。
-# 服务器只做：停服务 → 下载产物 → 跑迁移 → 启动。
+# 服务器只做：停服务 → 下载产物 → 跑迁移 → 幂等创建初始管理员（跳过或补建）→ 启动。
 # 全程内存占用 < 200MB，绝不会 OOM 崩溃。
 set -euo pipefail
 
@@ -263,12 +265,23 @@ set -a; . ./.env; set +a
 # 跑迁移（失败则退出——数据库结构不匹配时服务可能无法运行）
 ./node_modules/.bin/prisma migrate deploy \
   || die "数据库迁移失败，服务未启动。检查 DATABASE_URL 是否正确，或手动修复后重跑：bash update.sh"
+echo "✓ 数据库迁移完成"
+
+# 幂等创建初始管理员（复用 prisma/create-admin.ts，与 install.sh / deploy.sh 同源）：
+# 库中已有用户则直接跳过，不会复活已删除数据；仅在「库为空」时创建
+# （覆盖首次安装中断后重跑 update.sh 的恢复场景，避免无管理员可登录）。
+# 未显式指定时用默认值 admin/123456；密码仅内存传递，不写入 .env、不落盘。
+ADMIN_NICKNAME="${ADMIN_NICKNAME:-admin}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-123456}"
+echo "▶ 幂等创建初始管理员（已有用户则跳过）..."
+ADMIN_NICKNAME="$ADMIN_NICKNAME" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+  ./node_modules/.bin/tsx prisma/create-admin.ts \
+  || die "初始管理员创建失败，服务未启动。手动修复后重跑：bash update.sh"
 
 # 注意：不执行 seed.ts！
 # seed 只在首次 install.sh 时执行，update 时执行会导致已删除的干员/标签/管理员复活
 # 如需手动重新 seed（表为空时才会插入，不会复活已删数据）：
 #   cd /opt/squad-signup && set -a; . ./.env; set +a && ./node_modules/.bin/tsx prisma/seed.ts
-echo "✓ 数据库迁移完成"
 
 # ================================================================
 # 重新配置 systemd 服务 + 启动
@@ -286,6 +299,14 @@ fi
 env_port=$(grep '^PORT=' "$INSTALL_DIR/.env" 2>/dev/null | sed -E "s/^PORT=//; s/^['\"]//; s/['\"]$//" || true)
 [[ -n "$env_port" ]] && port="$env_port"
 
+# 运行用户：沿用现有服务的 User（install.sh 按 sudo 调用者配置），
+# 避免更新后服务被重置为 root、uploads 等文件属主漂移
+service_user="root"
+if [[ -f /etc/systemd/system/squad-signup.service ]]; then
+  existing_user=$(grep -E '^User=' /etc/systemd/system/squad-signup.service | head -1 | cut -d= -f2)
+  [[ -n "$existing_user" ]] && service_user="$existing_user"
+fi
+
 cat > /etc/systemd/system/squad-signup.service <<EOF
 [Unit]
 Description=squad-signup (三角洲行动战队赛事报名)
@@ -301,7 +322,7 @@ Environment=PORT=$port
 ExecStart=$NODE_BIN $INSTALL_DIR/standalone/server.js
 Restart=on-failure
 RestartSec=5
-User=root
+User=$service_user
 
 [Install]
 WantedBy=multi-user.target

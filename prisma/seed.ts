@@ -2,6 +2,14 @@ import { PrismaClient, AbilityCategory } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+// 规范化战队前缀：去掉尾部旧分隔符后统一追加固定「丨」。
+// 与 src/lib/constants.ts 的 normalizeTeamPrefix 等价；因 dist 产物不含 src/，
+// 此处内联实现避免跨目录依赖（管理后台保存前缀时走同一规则，保证格式一致）。
+function normalizeTeamPrefix(input: string): string {
+  const letters = input.replace(/[丨|｜/\\·．.．\-—_~\s]+$/u, "").trim();
+  return letters ? `${letters}丨` : "";
+}
+
 async function main() {
   // 重要：seed 只在表为空时插入初始数据，避免复活管理员已删除的数据
   // 首次安装时表为空 → 正常插入
@@ -9,10 +17,12 @@ async function main() {
 
   // 0. 站点设置（战队前缀）
   // TEAM_PREFIX 由 install.sh 首次安装时询问并写入 .env（默认空 = 无前缀）。
+  // 仅输入战队缩写：落库前统一规范化为「缩写+固定分隔符丨」。
   // 仅在「全新库」（无任何用户）时创建设置行；存量老库的前缀已由迁移
   // 20260821000000_add_site_setting 的回填 SQL 从历史用户名推导写入。
-  // 注意：不再创建任何默认账户 —— 初始管理员在首次登录页面「系统初始化」中创建。
-  const teamPrefix = process.env.TEAM_PREFIX ?? "";
+  // 注意：不再创建任何默认账户 —— 初始管理员由部署脚本在终端创建
+  // （install.sh / deploy.sh / npm run create-admin，见 prisma/create-admin.ts）。
+  const teamPrefix = normalizeTeamPrefix(process.env.TEAM_PREFIX ?? "");
   const settingCount = await prisma.siteSetting.count();
   const userCount = await prisma.user.count();
   if (settingCount === 0 && userCount === 0) {

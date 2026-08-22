@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { Loading } from "@/components/ui/StateView";
-import { prefixDisplayName } from "@/lib/constants";
+import { prefixDisplayName, normalizeTeamPrefix, PREFIX_SEPARATOR } from "@/lib/constants";
 
 interface TeamSettings {
   teamPrefix: string;
@@ -15,10 +16,12 @@ interface TeamSettings {
 export default function AdminTeamPage() {
   const toast = useToast();
   const confirm = useConfirm();
+  const router = useRouter();
 
   const [settings, setSettings] = useState<TeamSettings | null>(null);
   const [loading, setLoading] = useState(true);
-  const [prefix, setPrefix] = useState("");
+  // 前缀仅缩写部分可编辑（分隔符固定为「丨」，展示与拼接由系统处理）
+  const [prefixAbbr, setPrefixAbbr] = useState("");
   const [savingPrefix, setSavingPrefix] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -29,7 +32,8 @@ export default function AdminTeamPage() {
     const data = await res.json();
     if (data.ok) {
       setSettings(data.data);
-      setPrefix(data.data.teamPrefix);
+      // 去掉尾部分隔符，输入框只展示/编辑缩写部分
+      setPrefixAbbr(prefixDisplayName(data.data.teamPrefix));
     } else {
       toast(data.error || "加载失败", "error");
     }
@@ -39,21 +43,23 @@ export default function AdminTeamPage() {
   useEffect(() => { load(); }, []);
 
   const handleSavePrefix = async () => {
-    const trimmed = prefix.trim();
+    const trimmed = prefixAbbr.trim();
     if (trimmed.length > 12) {
-      toast("前缀长度不能超过 12 个字符", "warning");
+      toast("战队缩写长度不能超过 12 个字符", "warning");
       return;
     }
     if (/\s/.test(trimmed)) {
-      toast("前缀不能包含空白字符", "warning");
+      toast("战队缩写不能包含空白字符", "warning");
       return;
     }
-    const changed = trimmed !== settings?.teamPrefix;
-    const displayName = prefixDisplayName(trimmed) || "无";
+    // 拼接固定分隔符得到完整前缀（服务端也会规范化，双保险）
+    const fullPrefix = normalizeTeamPrefix(trimmed);
+    const changed = fullPrefix !== settings?.teamPrefix;
+    const displayName = trimmed || "无";
     const yes = await confirm({
       title: "修改战队名称前缀",
       message: changed
-        ? `确定将前缀修改为「${trimmed || "（无前缀）"}」吗？\n\n所有存量用户的登录用户名将自动迁移为「${trimmed || "无前缀"}＋昵称」，队员需按新前缀登录。站点标题将显示为「${displayName}战队报名系统」。`
+        ? `确定将前缀修改为「${fullPrefix || "（无前缀）"}」吗？\n\n所有存量用户的登录用户名将自动迁移为「${fullPrefix || "无前缀"}＋昵称」，队员需按新前缀登录。站点标题将显示为「${displayName}战队报名系统」。`
         : `前缀未变化，仅保存当前设置。`,
       danger: changed,
     });
@@ -63,7 +69,7 @@ export default function AdminTeamPage() {
     const res = await fetch("/api/admin/team", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ teamPrefix: trimmed }),
+      body: JSON.stringify({ teamPrefix: fullPrefix }),
     });
     const data = await res.json();
     setSavingPrefix(false);
@@ -73,6 +79,9 @@ export default function AdminTeamPage() {
         "success"
       );
       load();
+      // 刷新服务端组件：侧边栏品牌名与标签页标题（站点名称）随之自动更新，
+      // 无需手动刷新页面
+      router.refresh();
     } else {
       toast(data.error || "保存失败", "error");
     }
@@ -90,7 +99,7 @@ export default function AdminTeamPage() {
     }
     const yes = await confirm({
       title: "上传战队图标",
-      message: `确定将「${file.name}」设为战队图标吗？\n\n要求 32×32 的 .ico 文件，将应用于浏览器标签页图标。`,
+      message: `确定将「${file.name}」设为战队图标吗？\n\n要求 32×32 的 .ico 文件，将应用于浏览器标签页、侧边栏与登录页图标。`,
     });
     if (!yes) return;
 
@@ -103,6 +112,8 @@ export default function AdminTeamPage() {
     if (data.ok) {
       toast("图标已更新", "success");
       load();
+      // 刷新服务端组件：侧边栏图标与标签页图标（版本号变化）随之自动更新
+      router.refresh();
     } else {
       toast(data.error || "上传失败", "error");
     }
@@ -121,6 +132,8 @@ export default function AdminTeamPage() {
     if (data.ok) {
       toast("已恢复默认图标", "success");
       load();
+      // 刷新服务端组件：侧边栏图标与标签页图标随之恢复默认
+      router.refresh();
     } else {
       toast(data.error || "操作失败", "error");
     }
@@ -141,15 +154,39 @@ export default function AdminTeamPage() {
       <div className="win-card" style={{ padding: 20, marginBottom: 16 }}>
         <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>战队名称前缀</h2>
         <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-          <input
-            className="win-input"
-            type="text"
-            placeholder="留空 = 无前缀"
-            value={prefix}
-            maxLength={12}
-            onChange={(e) => setPrefix(e.target.value)}
-            style={{ flex: 1 }}
-          />
+          <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
+            <input
+              className="win-input"
+              type="text"
+              placeholder="战队缩写，留空 = 无前缀"
+              value={prefixAbbr}
+              maxLength={12}
+              // 分隔符由系统固定拼接，输入中不允许出现分隔符字符
+              onChange={(e) => setPrefixAbbr(e.target.value.replace(/[丨|｜]/g, ""))}
+              style={{
+                flex: 1,
+                borderTopRightRadius: prefixAbbr.trim() ? 0 : undefined,
+                borderBottomRightRadius: prefixAbbr.trim() ? 0 : undefined,
+              }}
+            />
+            {prefixAbbr.trim() && (
+              // 固定分隔符：不可编辑（仅缩写部分可修改）
+              <span
+                className="win-input"
+                style={{
+                  flexShrink: 0,
+                  width: "auto",
+                  borderLeft: "none",
+                  borderTopLeftRadius: 0,
+                  borderBottomLeftRadius: 0,
+                  color: "var(--win-text-tertiary)",
+                  background: "var(--win-bg-hover)",
+                }}
+              >
+                {PREFIX_SEPARATOR}
+              </span>
+            )}
+          </div>
           <button
             className="win-btn win-btn-primary"
             onClick={handleSavePrefix}
@@ -159,9 +196,10 @@ export default function AdminTeamPage() {
           </button>
         </div>
         <p style={{ fontSize: 12, color: "var(--win-text-tertiary)", marginTop: 10, lineHeight: 1.7 }}>
-          · 用户名 = 前缀 + 昵称（如「{prefix || "无前缀"}＋昵称」），登录与注册均按此前缀拼接<br />
+          · 仅可修改战队缩写，分隔符「{PREFIX_SEPARATOR}」固定自动拼接、不可修改<br />
+          · 用户名 = 前缀 + 昵称（如「{prefixAbbr.trim() ? `${prefixAbbr.trim()}${PREFIX_SEPARATOR}` : "无前缀"}＋昵称」），登录与注册均按此前缀拼接<br />
           · 修改后所有存量用户的用户名将自动迁移为新前缀 + 昵称，队员需按新前缀登录<br />
-          · 站点标题显示为「{prefixDisplayName(prefix) || "战队"}报名系统」样式的展示名（自动去掉尾部 丨 - 等分隔符）
+          · 站点标题显示为「{prefixAbbr.trim() || "战队"}报名系统」
         </p>
       </div>
 

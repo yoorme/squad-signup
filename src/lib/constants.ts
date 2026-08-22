@@ -1,10 +1,21 @@
 // 全局常量与工具函数（同构模块：会被 client 组件引用，禁止引入 node 内置模块）
 // 战队名称前缀已改为数据库配置（SiteSetting.teamPrefix），由管理后台「战队管理」维护
 
+// 前缀分隔符：固定拼接在战队缩写之后（如缩写 "XX" → 前缀 "XX丨"），不可修改
+export const PREFIX_SEPARATOR = "丨";
+
 // 从前缀中提取「战队展示名」：去掉尾部的分隔符（如 "XX丨" → "XX"）
 // 用于站点标题（XX战队报名系统）与侧边栏标识；空前缀返回空字符串
 export function prefixDisplayName(prefix: string): string {
   return prefix.replace(/[丨|｜/\\·．.．\-—_~\s]+$/u, "").trim();
+}
+
+// 规范化战队前缀：去掉输入尾部的分隔符（兼容旧数据/手工输入）后，
+// 统一追加固定分隔符「丨」；缩写为空返回空字符串（无前缀）。
+// 服务端与客户端共用，保证落库格式一致（仅缩写部分可自定义）。
+export function normalizeTeamPrefix(input: string): string {
+  const letters = prefixDisplayName(input);
+  return letters ? letters + PREFIX_SEPARATOR : "";
 }
 
 // 时间格式化：YYYY-MM-DD HH:mm

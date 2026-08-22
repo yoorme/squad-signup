@@ -459,16 +459,18 @@ EOF
 
   # 战队名称前缀：仅在此处（首次安装创建 .env）询问；
   # 更新时上方「.env 已存在，保留配置」会提前返回，不会再询问
+  # 仅输入战队缩写（如 XX）：落库时统一拼接固定分隔符「丨」成为前缀
   if is_interactive; then
     cat >&2 <<EOF
 
-${C_BOLD}战队名称前缀（可选）${C_RESET}
-用于登录用户名拼接（前缀+昵称，如「XX丨XXX」）与站点标题。
+${C_BOLD}战队缩写（可选）${C_RESET}
+用于登录用户名拼接（缩写+固定分隔符丨+昵称，如「XX丨XXX」）与站点标题。
+仅输入战队缩写（如 XX），分隔符「丨」由系统自动拼接、不可修改。
 直接回车 = 不使用前缀；之后可随时在管理后台「战队管理」中修改。
 
 EOF
   fi
-  ask team_prefix "战队名称前缀（回车=无前缀）" "$team_prefix"
+  ask team_prefix "战队缩写（回车=无前缀）" "$team_prefix"
 
   # 初始管理员：首次部署时在终端直接创建（迁移完成后写入数据库）
   # 默认账户 admin、默认密码 123456；密码不写入 .env（不落盘）
@@ -587,45 +589,16 @@ run_migrate() {
 # ---------------- 初始管理员（终端创建） ----------------
 # 首次安装时由终端询问账户/密码（configure_env），迁移完成后写入数据库。
 # 密码不落盘（仅安装过程内存传递）；库中已有用户则跳过（幂等，重跑安全）。
+# 逻辑复用 prisma/create-admin.ts（与 deploy.sh / npm run create-admin 同源）。
 create_initial_admin() {
-  if [[ -z "${ADMIN_NICKNAME:-}" ]]; then
-    warn "未设置初始管理员账户，首次访问站点时请通过「系统初始化」页面创建"
-    return 0
-  fi
+  # 未显式指定时用默认值：安装中断恢复、自动化部署均安全
+  ADMIN_NICKNAME="${ADMIN_NICKNAME:-admin}"
+  ADMIN_PASSWORD="${ADMIN_PASSWORD:-123456}"
   cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
   set -a; . "$INSTALL_DIR/.env"; set +a
   log "创建初始管理员..."
-  ADMIN_NICKNAME="$ADMIN_NICKNAME" ADMIN_PASSWORD="$ADMIN_PASSWORD" node <<'JS' || die "创建初始管理员失败"
-const { PrismaClient } = require("@prisma/client");
-const bcrypt = require("bcryptjs");
-(async () => {
-  const prisma = new PrismaClient();
-  try {
-    const count = await prisma.user.count();
-    if (count > 0) {
-      console.log("✓ 数据库已有用户，跳过初始管理员创建");
-      return;
-    }
-    const nickname = (process.env.ADMIN_NICKNAME || "").trim();
-    const password = process.env.ADMIN_PASSWORD || "";
-    const prefix = process.env.TEAM_PREFIX || "";
-    if (!nickname || password.length < 6 || password.length > 64) {
-      console.error("✗ 管理员账户或密码不合法");
-      process.exit(1);
-    }
-    const passwordHash = await bcrypt.hash(password, 10);
-    const user = await prisma.user.create({
-      data: { username: prefix + nickname, nickname, passwordHash, role: "ADMIN" },
-    });
-    console.log(`✓ 初始管理员已创建：${user.username}`);
-  } finally {
-    await prisma.$disconnect();
-  }
-})().catch((e) => {
-  console.error("✗ " + e.message);
-  process.exit(1);
-});
-JS
+  ADMIN_NICKNAME="$ADMIN_NICKNAME" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+    ./node_modules/.bin/tsx prisma/create-admin.ts || die "创建初始管理员失败"
 }
 
 # ---------------- 服务管理 ----------------
@@ -790,6 +763,9 @@ do_update() {
   fetch_dist
   configure_env   # 已有 .env 时仅加载
   run_migrate
+  # 幂等创建管理员：正常更新时库中已有用户直接跳过；
+  # 首次安装中断后重跑（.env 已生成但库为空）则用默认值补建，避免无法登录
+  create_initial_admin
   chown_install_dir
   if has_systemd; then
     setup_systemd
@@ -881,7 +857,7 @@ ${C_GREEN}${C_BOLD}✓ squad-signup 安装完成${C_RESET}
   目录：$INSTALL_DIR
   端口：$port
   站点：${NEXTAUTH_URL:-http://$(server_ip):$port}
-  初始管理员：${TEAM_PREFIX:-}${ADMIN_NICKNAME:-（未创建，首次访问站点时通过「系统初始化」页面创建）}
+  初始管理员：${TEAM_PREFIX:-}${ADMIN_NICKNAME:-admin}
 EOF
   if [[ "${ADMIN_PASSWORD:-}" == "123456" ]]; then
     cat >&2 <<EOF

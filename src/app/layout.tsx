@@ -11,11 +11,14 @@ import "./globals.css";
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const { teamPrefix } = await getSiteSettings();
+  const { teamPrefix, iconUpdatedAt } = await getSiteSettings();
   const displayName = prefixDisplayName(teamPrefix);
   return {
     title: `${displayName}战队报名系统`,
     description: "三角洲行动战队内部赛事报名系统",
+    // 标签页图标带版本号（iconUpdatedAt）：更换图标后 URL 变化，
+    // 浏览器强制重新拉取，修复「刷新网页图标不生效」的缓存问题
+    icons: { icon: `/favicon.ico?v=${iconUpdatedAt?.getTime() ?? 0}` },
   };
 }
 

@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode } from "react";
-import { prefixDisplayName } from "@/lib/constants";
 
 interface NavItem {
   href: string;
@@ -17,13 +16,16 @@ interface AppShellProps {
   // 导航项由 (app)/layout.tsx 统一构造（含未读角标），此处不再提供默认值
   navItems: NavItem[];
   showAdmin?: boolean;
-  // 战队名称前缀（战队管理中配置），用于侧边栏标识展示
-  teamPrefix?: string;
+  // 图标版本号（iconUpdatedAt 时间戳）：拼在 /favicon.ico?v= 后，
+  // 管理员更换图标后刷新页面即可看到新图标（绕过浏览器缓存）
+  iconVersion?: number;
+  // 战队展示名（前缀去掉分隔符，如 "XX丨" → "XX"）：拼入侧边栏品牌名，
+  // 修改前缀后随 (app)/layout 重新渲染自动更新
+  teamDisplayName?: string;
 }
 
-export function AppShell({ children, navItems, showAdmin, teamPrefix }: AppShellProps) {
+export function AppShell({ children, navItems, showAdmin, iconVersion, teamDisplayName }: AppShellProps) {
   const pathname = usePathname();
-  const displayName = prefixDisplayName(teamPrefix ?? "");
 
   const adminItem: NavItem = {
     href: "/admin",
@@ -61,37 +63,21 @@ export function AppShell({ children, navItems, showAdmin, teamPrefix }: AppShell
         id="desktop-nav"
       >
         <div style={{ padding: "12px 12px 24px", display: "flex", alignItems: "center", gap: 8 }}>
-          {displayName ? (
-            <div
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 6,
-                background: "linear-gradient(135deg, var(--win-accent), var(--win-accent-pressed))",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "white",
-                fontWeight: 700,
-                fontSize: displayName.length > 3 ? 11 : 14,
-                flexShrink: 0,
-              }}
-            >
-              {displayName}
-            </div>
-          ) : (
-            // 无前缀时用战队图标（与管理后台配置的网页图标一致）
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src="/favicon.ico"
-              alt="战队图标"
-              width={32}
-              height={32}
-              style={{ borderRadius: 6, imageRendering: "pixelated", flexShrink: 0 }}
-            />
-          )}
+          {/* 战队图标：始终显示管理后台配置的图标（自定义优先，无则默认）；
+              v= 版本号在更换图标后变化，刷新页面即可绕过浏览器缓存 */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/favicon.ico?v=${iconVersion ?? 0}`}
+            alt="战队图标"
+            width={32}
+            height={32}
+            style={{ borderRadius: 6, imageRendering: "pixelated", flexShrink: 0 }}
+          />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--win-text)" }}>战队报名</div>
+            {/* 品牌名跟随战队前缀（如 XX丨 → “XX战队报名”）；无前缀时仅显示“战队报名” */}
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--win-text)" }}>
+              {teamDisplayName ? `${teamDisplayName}战队报名` : "战队报名"}
+            </div>
             <div style={{ fontSize: 11, color: "var(--win-text-tertiary)" }}>三角洲行动</div>
           </div>
         </div>

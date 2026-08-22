@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { prisma } from "@/lib/prisma";
 import { getSiteSettings } from "@/lib/site-settings";
+import { prefixDisplayName } from "@/lib/constants";
 import { Role } from "@prisma/client";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -66,7 +67,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ];
 
   return (
-    <AppShell navItems={navItems} showAdmin={isAdmin} teamPrefix={settings.teamPrefix}>
+    <AppShell
+      navItems={navItems}
+      showAdmin={isAdmin}
+      iconVersion={settings.iconUpdatedAt?.getTime() ?? 0}
+      teamDisplayName={prefixDisplayName(settings.teamPrefix)}
+    >
       {children}
     </AppShell>
   );

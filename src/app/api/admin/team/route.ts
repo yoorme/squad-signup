@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth-server";
 import { ok, fail, withErrorHandler } from "@/lib/api";
 import { getSiteSettings, LEGACY_DEFAULT_PREFIX } from "@/lib/site-settings";
+import { normalizeTeamPrefix, PREFIX_SEPARATOR } from "@/lib/constants";
 import { getUploadDir } from "@/lib/upload-dir";
 import { writeFile, mkdir, unlink, stat } from "fs/promises";
 import path from "path";
@@ -64,15 +65,20 @@ export const GET = withErrorHandler(async () => {
 
 // PATCH /api/admin/team
 // body: { teamPrefix: string }
+// 前缀仅缩写部分可自定义：服务端去掉尾部旧分隔符后统一追加固定「丨」
+// （normalizeTeamPrefix），分隔符不可通过 API 修改。
 // 前缀变更时在同一事务内将所有用户名迁移为「新前缀+昵称」，
 // 采用两阶段更新（先临时名再最终名）规避唯一约束的行间冲突
 export const PATCH = withErrorHandler(async (req: NextRequest) => {
   await requireAdmin();
   const body = await req.json();
-  const newPrefix = String(body?.teamPrefix ?? "").trim();
+  const raw = String(body?.teamPrefix ?? "").trim();
 
-  if (newPrefix.length > 12) return fail("前缀长度不能超过 12 个字符");
-  if (/\s/.test(newPrefix)) return fail("前缀不能包含空白字符");
+  if (/\s/.test(raw)) return fail("前缀不能包含空白字符");
+  const newPrefix = normalizeTeamPrefix(raw);
+  if (newPrefix && newPrefix.length > PREFIX_SEPARATOR.length + 12) {
+    return fail("战队缩写长度不能超过 12 个字符");
+  }
 
   const current = await getSiteSettings();
 
