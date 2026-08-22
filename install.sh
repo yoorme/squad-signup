@@ -9,13 +9,17 @@
 # 彻底告别小内存服务器构建 OOM 崩溃问题。
 #
 # 用法：
-#   安装或更新（自动识别）：
+#   新增/重装战队网站：
 #     curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/install.sh | bash
 #
 #   指定参数：
 #     curl -fsSL ... | bash -s -- --update
+#     curl -fsSL ... | bash -s -- --update-all
 #     curl -fsSL ... | bash -s -- --uninstall
 #     curl -fsSL ... | bash -s -- --status
+#
+#   更新所有实例请使用：
+#     curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/update.sh | bash
 #
 #   非交互（自动化部署）：
 #     DATABASE_URL=... DIRECT_URL=... NEXTAUTH_URL=https://... \
@@ -67,6 +71,14 @@ else
   SYSTEM_CONF=""
 fi
 INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
+
+# 多实例支持：共享同一份 standalone/prisma 代码，实例数据放在 instances/<id> 下。
+# 旧版单实例（$INSTALL_DIR/.env）仍作为 legacy 实例兼容保留。
+INSTANCE_ROOT="${INSTALL_DIR}/instances"
+INSTANCE_ID=""
+INSTANCE_DIR=""
+INSTANCE_ENV=""
+SERVICE_NAME="squad-signup"
 
 # ---------------- 颜色输出 ----------------
 if [[ "${FORCE_COLOR:-1}" != "0" ]] && { [[ -t 2 ]] || [[ -n "${CI:-}" ]]; }; then
@@ -397,7 +409,8 @@ env_escape() {
 }
 
 configure_env() {
-  local env_file="$INSTALL_DIR/.env"
+  local env_file="${1:-$INSTALL_DIR/.env}"
+  local upload_dir="${2:-$INSTALL_DIR/uploads}"
   if [[ -f "$env_file" ]]; then
     local existing_db
     existing_db=$(grep '^DATABASE_URL=' "$env_file" 2>/dev/null | sed -E "s/^DATABASE_URL=//; s/^['\"]//; s/['\"]$//" || true)
@@ -531,7 +544,7 @@ EOF
     echo "NEXTAUTH_URL=$(env_escape "$site_url")"
     echo "AUTH_TRUST_HOST=$(env_escape "$trust_host")"
     echo "TRUST_PROXY=$(env_escape "$trust_proxy")"
-    echo "UPLOAD_DIR='$INSTALL_DIR/uploads'"
+    echo "UPLOAD_DIR='$upload_dir'"
   } > "$env_file"
   chmod 600 "$env_file"
   ok ".env 已生成（端口 $port，战队前缀：${team_prefix:-无}）"
@@ -562,6 +575,105 @@ load_deploy_conf() {
   fi
 }
 
+# ---------------- 多实例辅助函数 ----------------
+get_env_value() {
+  local file="$1" key="$2"
+  grep "^${key}=" "$file" 2>/dev/null | head -1 | sed -E "s/^${key}=//; s/^['\"]//; s/['\"]$//" || true
+}
+
+# 输出已安装实例：id<TAB>port<TAB>prefix<TAB>url<TAB>service<TAB>env_file
+list_instances() {
+  if [[ -f "$INSTALL_DIR/.env" ]]; then
+    printf 'legacy\t%s\t%s\t%s\t%s\t%s\n' \
+      "$(get_env_value "$INSTALL_DIR/.env" PORT)" \
+      "$(get_env_value "$INSTALL_DIR/.env" TEAM_PREFIX)" \
+      "$(get_env_value "$INSTALL_DIR/.env" NEXTAUTH_URL)" \
+      "squad-signup" \
+      "$INSTALL_DIR/.env"
+  fi
+  if [[ -d "$INSTANCE_ROOT" ]]; then
+    for d in "$INSTANCE_ROOT"/*/; do
+      [[ -d "$d" && -f "$d/.env" ]] || continue
+      local id; id=$(basename "$d")
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$id" \
+        "$(get_env_value "$d/.env" PORT)" \
+        "$(get_env_value "$d/.env" TEAM_PREFIX)" \
+        "$(get_env_value "$d/.env" NEXTAUTH_URL)" \
+        "squad-signup-$id" \
+        "$d/.env"
+    done
+  fi
+}
+
+print_instances() {
+  local found=0
+  while IFS=$'\t' read -r id port prefix url service env_file; do
+    [[ -n "$id" ]] || continue
+    found=1
+    printf "  - [%s] 端口 %s | 战队前缀：%s | 站点：%s\n" \
+      "$id" "$port" "${prefix:-无}" "$url"
+  done < <(list_instances)
+  [[ "$found" == "1" ]]
+}
+
+select_instance_by_id() {
+  local target="${1:-}"
+  while IFS=$'\t' read -r id port prefix url service env_file; do
+    if [[ "$id" == "$target" ]]; then
+      INSTANCE_ID="$id"
+      INSTANCE_ENV="$env_file"
+      SERVICE_NAME="$service"
+      if [[ "$id" == "legacy" ]]; then
+        INSTANCE_DIR="$INSTALL_DIR"
+      else
+        INSTANCE_DIR="$INSTANCE_ROOT/$id"
+      fi
+      return 0
+    fi
+  done < <(list_instances)
+  return 1
+}
+
+select_instance_interactive() {
+  echo "请选择要重新安装的战队网站："
+  local -a ids=()
+  while IFS=$'\t' read -r id port prefix url service env_file; do
+    ids+=("$id")
+    printf "  %d) [%s] 端口 %s | 战队前缀：%s\n" "${#ids[@]}" "$id" "$port" "${prefix:-无}"
+  done < <(list_instances)
+  if [[ ${#ids[@]} -eq 0 ]]; then
+    warn "没有可重新安装的实例"
+    return 1
+  fi
+  local choice=""
+  printf "%s?%s 请输入序号 [1]:%s " "$C_CYAN" "$C_RESET" "$C_RESET" >&2
+  IFS= read -r choice </dev/tty || choice=""
+  [[ -z "$choice" ]] && choice="1"
+  if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#ids[@]} )); then
+    warn "无效选择"
+    return 1
+  fi
+  select_instance_by_id "${ids[$((choice-1))]}"
+}
+
+prompt_instance_id() {
+  local val="${INSTANCE_ID:-}"
+  while true; do
+    ask val "实例标识（英文/数字/下划线/连字符，如 team-a）" "$val"
+    if [[ "$val" =~ ^[A-Za-z0-9_-]{1,32}$ ]]; then
+      INSTANCE_ID="$val"
+      INSTANCE_DIR="$INSTANCE_ROOT/$val"
+      INSTANCE_ENV="$INSTANCE_DIR/.env"
+      SERVICE_NAME="squad-signup-$val"
+      return 0
+    fi
+    warn "实例标识不合法：需 1-32 位英文/数字/下划线/连字符"
+    val=""
+    is_interactive || die "INSTANCE_ID 不合法"
+  done
+}
+
 # ---------------- 数据库迁移 ----------------
 # 只安装迁移+seed 必需的 4 个包（轻量，不 build，不会 OOM）
 # 必须锁版本！否则 npm 会装最新版引入破坏性变更：
@@ -573,13 +685,17 @@ load_deploy_conf() {
 #   prisma ^6.19.3 / @prisma/client ^6.19.3 / tsx ^4.23.1 / bcryptjs ^3.0.3
 run_migrate() {
   cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
-  log "安装迁移+seed 必需依赖（prisma@6 @prisma/client@6 tsx@4 bcryptjs@3）..."
-  npm install --no-audit --no-fund --no-save prisma@^6 @prisma/client@^6 tsx@^4 bcryptjs@^3 2>/dev/null || \
-    npm install --no-audit --no-fund prisma@^6 @prisma/client@^6 tsx@^4 bcryptjs@^3
+  if [[ -x "$INSTALL_DIR/node_modules/.bin/prisma" && -x "$INSTALL_DIR/node_modules/.bin/tsx" ]]; then
+    log "迁移依赖已存在，跳过安装"
+  else
+    log "安装迁移+seed 必需依赖（prisma@6 @prisma/client@6 tsx@4 bcryptjs@3）..."
+    npm install --no-audit --no-fund --no-save prisma@^6 @prisma/client@^6 tsx@^4 bcryptjs@^3 2>/dev/null || \
+      npm install --no-audit --no-fund prisma@^6 @prisma/client@^6 tsx@^4 bcryptjs@^3
+  fi
 
   # 生成 Prisma Client（@prisma/client 装好后需 generate 才能使用）
   log "生成 Prisma Client..."
-  set -a; . "$INSTALL_DIR/.env"; set +a
+  set -a; . "$INSTANCE_ENV"; set +a
   ./node_modules/.bin/prisma generate
 
   log "执行数据库迁移 + seed..."
@@ -597,7 +713,7 @@ create_initial_admin() {
   ADMIN_NICKNAME="${ADMIN_NICKNAME:-admin}"
   ADMIN_PASSWORD="${ADMIN_PASSWORD:-123456}"
   cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
-  set -a; . "$INSTALL_DIR/.env"; set +a
+  set -a; . "$INSTANCE_ENV"; set +a
   log "创建初始管理员..."
   ADMIN_NICKNAME="$ADMIN_NICKNAME" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
     ./node_modules/.bin/tsx prisma/create-admin.ts || die "创建初始管理员失败"
@@ -620,47 +736,44 @@ setup_systemd() {
   local node_bin; node_bin=$(node_bin_path)
   local port="${PORT:-$DEFAULT_PORT}"
   local user; user=$(run_user)
-  local env_file="$INSTALL_DIR/.env"
-  local work_dir
-  if [[ "$INSTALL_DIR" = /* ]]; then
-    work_dir="$INSTALL_DIR"
-  else
-    work_dir=$(cd "$INSTALL_DIR" 2>/dev/null && pwd) || work_dir="$INSTALL_DIR"
-  fi
+  local env_file="$INSTANCE_ENV"
+  local work_dir="$INSTALL_DIR"
 
   log "配置 systemd 服务..."
-  cat > /etc/systemd/system/squad-signup.service <<EOF
+  cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=squad-signup (三角洲行动战队赛事报名)
+Description=squad-signup ${INSTANCE_ID:-} (三角洲行动战队赛事报名)
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=${work_dir}
-EnvironmentFile=${env_file}
+WorkingDirectory=$work_dir
+EnvironmentFile=$env_file
 Environment=NODE_ENV=production
 Environment=HOSTNAME=0.0.0.0
-Environment=PORT=${port}
-ExecStart=${node_bin} ${work_dir}/standalone/server.js
+ExecStart=$node_bin $work_dir/standalone/server.js
 Restart=on-failure
 RestartSec=5
-User=${user}
+User=$user
 
 [Install]
 WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
-  systemctl enable squad-signup >/dev/null 2>&1 || true
-  ok "systemd 服务已安装（端口 ${port}）"
+  systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
+  ok "systemd 服务已安装（端口 ${port}，服务名 ${SERVICE_NAME}）"
 }
 
 setup_nohup() {
   local node_bin; node_bin=$(node_bin_path)
   local port="${PORT:-$DEFAULT_PORT}"
+  local env_file="$INSTANCE_ENV"
+  local instance_dir="$INSTANCE_DIR"
 
-  cat > "$INSTALL_DIR/start.sh" <<EOF
+  mkdir -p "$instance_dir/logs"
+  cat > "$instance_dir/start.sh" <<EOF
 #!/usr/bin/env bash
-cd "$INSTALL_DIR" || exit 1
+cd "$instance_dir" || exit 1
 mkdir -p logs
 if [ -f .pid ]; then
   old_pid=\$(cat .pid 2>/dev/null)
@@ -674,11 +787,11 @@ fi
 export NODE_ENV=production
 export HOSTNAME=0.0.0.0
 export PORT="$port"
-[ -f .env ] && { set -a; . ./.env; set +a; }
+[ -f "$env_file" ] && { set -a; . "$env_file"; set +a; }
 if command -v setsid >/dev/null 2>&1; then
-  setsid nohup "$node_bin" standalone/server.js >> logs/app.log 2>&1 &
+  setsid nohup "$node_bin" "$INSTALL_DIR/standalone/server.js" >> logs/app.log 2>&1 &
 else
-  nohup "$node_bin" standalone/server.js >> logs/app.log 2>&1 &
+  nohup "$node_bin" "$INSTALL_DIR/standalone/server.js" >> logs/app.log 2>&1 &
 fi
 echo \$! > .pid
 sleep 1
@@ -689,9 +802,9 @@ else
   exit 1
 fi
 EOF
-  cat > "$INSTALL_DIR/stop.sh" <<EOF
+  cat > "$instance_dir/stop.sh" <<EOF
 #!/usr/bin/env bash
-cd "$INSTALL_DIR" || exit 1
+cd "$instance_dir" || exit 1
 if [ -f .pid ]; then
   pid=\$(cat .pid 2>/dev/null)
   rm -f .pid
@@ -713,20 +826,20 @@ else
   echo "未运行"
 fi
 EOF
-  chmod +x "$INSTALL_DIR/start.sh" "$INSTALL_DIR/stop.sh"
+  chmod +x "$instance_dir/start.sh" "$instance_dir/stop.sh"
   ok "已生成 start.sh / stop.sh（端口 ${port}）"
-  warn "当前环境无 systemd，请用 ./start.sh 启动"
+  warn "当前环境无 systemd，请用 $instance_dir/start.sh 启动"
 }
 
 start_service() {
   if has_systemd; then
     log "启动服务..."
-    systemctl restart squad-signup
+    systemctl restart "$SERVICE_NAME"
     sleep 2
-    if systemctl is-active --quiet squad-signup; then
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
       ok "服务已启动"
     else
-      warn "服务可能未正常启动，查看日志：journalctl -u squad-signup -n 50"
+      warn "服务可能未正常启动，查看日志：journalctl -u $SERVICE_NAME -n 50"
     fi
   fi
 }
@@ -735,13 +848,25 @@ start_service() {
 # 下载源不再手动询问：内置多个镜像 + 原生地址，每次自动并行测速选最快源
 # （MIRROR_URL 环境变量仍可指定额外语速候选，优先参与测速）
 
-do_install() {
-  log "${C_BOLD}安装 squad-signup（预构建产物模式）${C_RESET}"
+ensure_shared_runtime() {
   ensure_base_tools
   ensure_node
-  fetch_dist
   load_deploy_conf
-  configure_env
+  if [[ ! -d "$INSTALL_DIR/standalone" && ! -d "$INSTALL_DIR/standalone.old" ]]; then
+    fetch_dist
+  else
+    log "检测到已有共享运行时，跳过重复下载"
+  fi
+}
+
+install_new_instance() {
+  log "${C_BOLD}新增战队网站（共享运行时）${C_RESET}"
+  ensure_shared_runtime
+  prompt_instance_id
+  mkdir -p "$INSTANCE_DIR"
+  INSTANCE_ENV="$INSTANCE_DIR/.env"
+  SERVICE_NAME="squad-signup-$INSTANCE_ID"
+  configure_env "$INSTANCE_ENV" "$INSTANCE_DIR/uploads"
   run_migrate
   create_initial_admin
   chown_install_dir
@@ -750,36 +875,120 @@ do_install() {
   print_summary
 }
 
+reinstall_existing_instance() {
+  log "${C_BOLD}重新安装已有战队网站${C_RESET}"
+  ensure_shared_runtime
+  if [[ -z "${INSTANCE_ID:-}" ]]; then
+    select_instance_interactive || die "未选择实例"
+  else
+    select_instance_by_id "$INSTANCE_ID" || die "实例 $INSTANCE_ID 不存在"
+  fi
+  set -a; . "$INSTANCE_ENV"; set +a
+  mkdir -p "${INSTANCE_DIR:-$INSTALL_DIR}/uploads"
+  run_migrate
+  create_initial_admin
+  chown_install_dir
+  if has_systemd; then setup_systemd; else setup_nohup; fi
+  start_service
+  print_summary
+}
+
+do_install() {
+  log "${C_BOLD}战队网站管理（多实例）${C_RESET}"
+  if is_interactive && [[ -z "${INSTANCE_ID:-}" ]]; then
+    echo "当前服务器已安装的战队网站："
+    if print_instances; then :; else
+      echo "  （无）"
+    fi
+    echo ""
+    echo "请选择操作："
+    echo "  1) 新增战队网站"
+    echo "  2) 重新安装已有战队网站"
+    local choice=""
+    printf "%s?%s 请输入序号 [1]:%s " "$C_CYAN" "$C_RESET" "$C_RESET" >&2
+    IFS= read -r choice </dev/tty || choice=""
+    [[ -z "$choice" ]] && choice="1"
+    if [[ "$choice" == "1" ]]; then
+      install_new_instance
+    elif [[ "$choice" == "2" ]]; then
+      reinstall_existing_instance
+    else
+      die "无效选择"
+    fi
+  else
+    if [[ -n "${INSTANCE_ID:-}" ]] && select_instance_by_id "$INSTANCE_ID"; then
+      reinstall_existing_instance
+    else
+      install_new_instance
+    fi
+  fi
+}
+
 do_update() {
-  log "${C_BOLD}更新 squad-signup（预构建产物模式）${C_RESET}"
-  [[ -d "$INSTALL_DIR" ]] || die "$INSTALL_DIR 不存在，请用 --install 安装"
+  log "${C_BOLD}install.sh 仅负责新增/重装战队网站；更新所有实例请使用 update.sh${C_RESET}"
+  if [[ -f "$INSTALL_DIR/update.sh" ]]; then
+    bash "$INSTALL_DIR/update.sh"
+  else
+    curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/update.sh" | bash
+  fi
+}
+
+do_update_all() {
+  log "${C_BOLD}更新所有战队网站到同一版本（数据/端口分离）${C_RESET}"
   ensure_base_tools
   ensure_node
   load_deploy_conf
-  # 先停服务（释放端口）
-  if has_systemd; then
-    systemctl stop squad-signup 2>/dev/null || true
-  elif [[ -f "$INSTALL_DIR/stop.sh" ]]; then
-    bash "$INSTALL_DIR/stop.sh" 2>/dev/null || true
-  fi
+
+  # 先停止全部实例，避免替换 standalone 时文件占用
+  local -a service_names=()
+  while IFS=$'\t' read -r id port prefix url service env_file; do
+    service_names+=("$service")
+    if has_systemd; then
+      systemctl stop "$service" 2>/dev/null || true
+    else
+      local stop_script
+      if [[ "$id" == "legacy" ]]; then stop_script="$INSTALL_DIR/stop.sh"; else stop_script="$INSTANCE_ROOT/$id/stop.sh"; fi
+      [[ -f "$stop_script" ]] && bash "$stop_script" 2>/dev/null || true
+    fi
+  done < <(list_instances)
+
   fetch_dist
-  configure_env   # 已有 .env 时仅加载
-  run_migrate
-  # 幂等创建管理员：正常更新时库中已有用户直接跳过；
-  # 首次安装中断后重跑（.env 已生成但库为空）则用默认值补建，避免无法登录
-  create_initial_admin
-  chown_install_dir
-  if has_systemd; then
-    setup_systemd
-    start_service
-  else
-    setup_nohup
-    warn "请手动重启：./stop.sh && ./start.sh"
-  fi
-  ok "更新完成"
+
+  # 安装一次共享迁移依赖
+  cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
+  log "安装共享迁移依赖..."
+  npm install --no-audit --no-fund --no-save prisma@^6 @prisma/client@^6 tsx@^4 bcryptjs@^3 2>/dev/null || \
+    npm install --no-audit --no-fund prisma@^6 @prisma/client@^6 tsx@^4 bcryptjs@^3
+  ./node_modules/.bin/prisma generate
+
+  while IFS=$'\t' read -r id port prefix url service env_file; do
+    log "更新实例 [${id}]（端口 ${port}）..."
+    INSTANCE_ID="$id"
+    INSTANCE_ENV="$env_file"
+    SERVICE_NAME="$service"
+    if [[ "$id" == "legacy" ]]; then INSTANCE_DIR="$INSTALL_DIR"; else INSTANCE_DIR="$INSTANCE_ROOT/$id"; fi
+    set -a; . "$INSTANCE_ENV"; set +a
+    mkdir -p "$INSTANCE_DIR/uploads"
+    set -a; . "$INSTANCE_ENV"; set +a
+    ./node_modules/.bin/prisma migrate deploy
+    ADMIN_NICKNAME="${ADMIN_NICKNAME:-admin}" ADMIN_PASSWORD="${ADMIN_PASSWORD:-123456}" \
+      ./node_modules/.bin/tsx prisma/create-admin.ts || warn "实例 ${id} 初始管理员创建跳过或失败（已有用户时正常）"
+    chown_install_dir
+    if has_systemd; then
+      setup_systemd
+      systemctl start "$SERVICE_NAME" 2>/dev/null || warn "实例 ${id} 启动失败，请查看日志"
+    else
+      setup_nohup
+    fi
+  done < <(list_instances)
+
+  ok "全部实例更新完成"
 }
 
 do_uninstall() {
+  if [[ -n "$(list_instances)" ]]; then
+    die "检测到已安装战队网站。多实例模式下请勿使用 --uninstall 删除共享代码；请手动删除对应实例目录和服务，或重新运行安装脚本选择重装。"
+  fi
   log "${C_BOLD}卸载 squad-signup${C_RESET}"
   safe_rm_install_dir() {
     [[ -n "$INSTALL_DIR" ]] || { warn "INSTALL_DIR 为空，跳过删除"; return 0; }
@@ -832,22 +1041,26 @@ do_uninstall() {
 }
 
 do_status() {
-  log "${C_BOLD}squad-signup 状态${C_RESET}"
-  echo "安装目录：$INSTALL_DIR $([[ -d "$INSTALL_DIR/standalone" ]] && echo '[已安装]' || echo '[未安装]')"
+  log "${C_BOLD}squad-signup 多实例状态${C_RESET}"
+  echo "共享代码目录：$INSTALL_DIR $([[ -d "$INSTALL_DIR/standalone" ]] && echo '[已安装]' || echo '[未安装]')"
   echo "Node.js ：$(need_cmd node && node -v || echo '未安装')"
-  if has_systemd; then
-    echo "systemd ：$(systemctl is-active squad-signup 2>/dev/null || echo '未运行')"
-  else
-    if [[ -f "$INSTALL_DIR/.pid" ]]; then
-      echo "进程 PID：$(cat "$INSTALL_DIR/.pid" 2>/dev/null) ($(kill -0 "$(cat "$INSTALL_DIR/.pid" 2>/dev/null)" 2>/dev/null && echo '运行中' || echo '已停止'))"
-    else
-      echo "进程    ：未启动"
+  echo ""
+  echo "已安装实例："
+  local found=0
+  while IFS=$'\t' read -r id port prefix url service env_file; do
+    [[ -n "$id" ]] || continue
+    found=1
+    local state="未知"
+    if has_systemd; then
+      state=$(systemctl is-active "$service" 2>/dev/null || echo '未运行')
+    elif { [[ "$id" == "legacy" && -f "$INSTALL_DIR/.pid" ]] || [[ -f "$INSTANCE_ROOT/$id/.pid" ]]; }; then
+      local pid_file
+      [[ "$id" == "legacy" ]] && pid_file="$INSTALL_DIR/.pid" || pid_file="$INSTANCE_ROOT/$id/.pid"
+      state=$(kill -0 "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null && echo '运行中' || echo '已停止')
     fi
-  fi
-  if [[ -f "$INSTALL_DIR/.env" ]]; then
-    echo "站点 URL：$(grep '^NEXTAUTH_URL=' "$INSTALL_DIR/.env" | sed -E 's/^NEXTAUTH_URL=//; s/^['\''\"]//; s/['\''\"]$//')"
-    echo "数据库 ：$(grep '^DATABASE_URL=' "$INSTALL_DIR/.env" | sed -E 's/^DATABASE_URL=//; s/^['\''\"]//; s/['\''\"]$//; s|://[^@]+@|://***@|')"
-  fi
+    printf "  - [%s] 端口 %s | 前缀：%s | 状态：%s\n  URL：%s\n" "$id" "$port" "${prefix:-无}" "$state" "$url"
+  done < <(list_instances)
+  [[ "$found" == "1" ]] || echo "  （无）"
 }
 
 print_summary() {
@@ -872,21 +1085,21 @@ EOF
   if has_systemd; then
     cat >&2 <<EOF
   常用命令：
-    systemctl status squad-signup     # 查看状态
-    systemctl restart squad-signup    # 重启
-    journalctl -u squad-signup -f     # 查看日志
+    systemctl status ${SERVICE_NAME}     # 查看状态
+    systemctl restart ${SERVICE_NAME}    # 重启
+    journalctl -u ${SERVICE_NAME} -f     # 查看日志
 EOF
   else
     cat >&2 <<EOF
   启动/停止：
-    $INSTALL_DIR/start.sh
-    $INSTALL_DIR/stop.sh
-    tail -f $INSTALL_DIR/logs/app.log
+    $INSTANCE_DIR/start.sh
+    $INSTANCE_DIR/stop.sh
+    tail -f $INSTANCE_DIR/logs/app.log
 EOF
   fi
   cat >&2 <<EOF
 
-  更新：curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | bash
+  更新：curl -fsSL https://raw.githubusercontent.com/${REPO}/main/update.sh | bash
 EOF
 }
 
@@ -896,6 +1109,7 @@ usage() {
   无参数    已安装则更新，未安装则安装
   --install 强制安装
   --update  强制更新
+  --update-all 更新所有已安装实例（推荐用 update.sh）
   --uninstall 卸载
   --status  查看状态
   --help    显示帮助
@@ -909,6 +1123,7 @@ main() {
     case "$1" in
       --install)    action="install" ;;
       --update)     action="update" ;;
+      --update-all) action="update_all" ;;
       --uninstall)  action="uninstall" ;;
       --status)     action="status" ;;
       -h|--help)    usage; exit 0 ;;
@@ -921,17 +1136,13 @@ main() {
   [[ "$action" == "uninstall" ]] && { do_uninstall; exit 0; }
 
   if [[ "$action" == "auto" ]]; then
-    # standalone.old 残留 = 上次更新在替换阶段被中断，同样按更新处理（重跑即恢复）
-    if [[ -d "$INSTALL_DIR/standalone" || -d "$INSTALL_DIR/standalone.old" ]]; then
-      action="update"
-    else
-      action="install"
-    fi
+    action="install"
   fi
 
   case "$action" in
     install) do_install ;;
     update)  do_update ;;
+    update_all) do_update_all ;;
   esac
 }
 
