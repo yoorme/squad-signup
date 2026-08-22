@@ -143,6 +143,15 @@ has_systemd() {
 
 server_ip() {
   local ip=""
+  # 云服务器上 ifconfig/route 经常只能拿到内网 IP，优先尝试公网出口 IP。
+  ip=$(curl -fsSL --connect-timeout 3 --max-time 5 https://api.ipify.org 2>/dev/null) || true
+  if [[ -z "$ip" ]]; then
+    ip=$(curl -fsSL --connect-timeout 3 --max-time 5 https://ifconfig.me 2>/dev/null) || true
+  fi
+  if [[ -n "$ip" ]]; then
+    printf '%s' "$ip"
+    return 0
+  fi
   ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1); exit}') || true
   if [[ -z "$ip" ]]; then
     ip=$(hostname -I 2>/dev/null | awk '{print $1}') || true
@@ -1066,6 +1075,10 @@ do_status() {
 
 print_summary() {
   local port="${PORT:-$DEFAULT_PORT}"
+  local display_prefix="${TEAM_PREFIX:-}"
+  if [[ -n "$display_prefix" && "$display_prefix" != *丨 ]]; then
+    display_prefix="${display_prefix}丨"
+  fi
   cat >&2 <<EOF
 
 ${C_GREEN}${C_BOLD}✓ squad-signup 安装完成${C_RESET}
@@ -1073,7 +1086,7 @@ ${C_GREEN}${C_BOLD}✓ squad-signup 安装完成${C_RESET}
   目录：$INSTALL_DIR
   端口：$port
   站点：${NEXTAUTH_URL:-http://$(server_ip):$port}
-  初始管理员：${TEAM_PREFIX:-}${ADMIN_NICKNAME:-admin}
+  初始管理员：${display_prefix}${ADMIN_NICKNAME:-admin}
 EOF
   if [[ "${ADMIN_PASSWORD:-}" == "123456" ]]; then
     cat >&2 <<EOF
