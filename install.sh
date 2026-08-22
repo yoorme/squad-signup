@@ -581,10 +581,11 @@ get_env_value() {
   grep "^${key}=" "$file" 2>/dev/null | head -1 | sed -E "s/^${key}=//; s/^['\"]//; s/['\"]$//" || true
 }
 
-# 输出已安装实例：id<TAB>port<TAB>prefix<TAB>url<TAB>service<TAB>env_file
+# 输出已安装实例：id<US>port<US>prefix<US>url<US>service<US>env_file
+# 使用 \x1f（unit separator）而不是 tab，避免空字段被 read 折叠导致错位。
 list_instances() {
   if [[ -f "$INSTALL_DIR/.env" ]]; then
-    printf 'legacy\t%s\t%s\t%s\t%s\t%s\n' \
+    printf 'legacy\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\n' \
       "$(get_env_value "$INSTALL_DIR/.env" PORT)" \
       "$(get_env_value "$INSTALL_DIR/.env" TEAM_PREFIX)" \
       "$(get_env_value "$INSTALL_DIR/.env" NEXTAUTH_URL)" \
@@ -595,7 +596,7 @@ list_instances() {
     for d in "$INSTANCE_ROOT"/*/; do
       [[ -d "$d" && -f "$d/.env" ]] || continue
       local id; id=$(basename "$d")
-      printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+      printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\n' \
         "$id" \
         "$(get_env_value "$d/.env" PORT)" \
         "$(get_env_value "$d/.env" TEAM_PREFIX)" \
@@ -608,7 +609,7 @@ list_instances() {
 
 print_instances() {
   local found=0
-  while IFS=$'\t' read -r id port prefix url service env_file; do
+  while IFS=$'\x1f' read -r id port prefix url service env_file; do
     [[ -n "$id" ]] || continue
     found=1
     printf "  - [%s] 端口 %s | 战队前缀：%s | 站点：%s\n" \
@@ -619,7 +620,7 @@ print_instances() {
 
 select_instance_by_id() {
   local target="${1:-}"
-  while IFS=$'\t' read -r id port prefix url service env_file; do
+  while IFS=$'\x1f' read -r id port prefix url service env_file; do
     if [[ "$id" == "$target" ]]; then
       INSTANCE_ID="$id"
       INSTANCE_ENV="$env_file"
@@ -638,7 +639,7 @@ select_instance_by_id() {
 select_instance_interactive() {
   echo "请选择要重新安装的战队网站："
   local -a ids=()
-  while IFS=$'\t' read -r id port prefix url service env_file; do
+  while IFS=$'\x1f' read -r id port prefix url service env_file; do
     ids+=("$id")
     printf "  %d) [%s] 端口 %s | 战队前缀：%s\n" "${#ids[@]}" "$id" "$port" "${prefix:-无}"
   done < <(list_instances)
@@ -941,7 +942,7 @@ do_update_all() {
 
   # 先停止全部实例，避免替换 standalone 时文件占用
   local -a service_names=()
-  while IFS=$'\t' read -r id port prefix url service env_file; do
+  while IFS=$'\x1f' read -r id port prefix url service env_file; do
     service_names+=("$service")
     if has_systemd; then
       systemctl stop "$service" 2>/dev/null || true
@@ -961,7 +962,7 @@ do_update_all() {
     npm install --no-audit --no-fund prisma@^6 @prisma/client@^6 tsx@^4 bcryptjs@^3
   ./node_modules/.bin/prisma generate
 
-  while IFS=$'\t' read -r id port prefix url service env_file; do
+  while IFS=$'\x1f' read -r id port prefix url service env_file; do
     log "更新实例 [${id}]（端口 ${port}）..."
     INSTANCE_ID="$id"
     INSTANCE_ENV="$env_file"
@@ -1047,7 +1048,7 @@ do_status() {
   echo ""
   echo "已安装实例："
   local found=0
-  while IFS=$'\t' read -r id port prefix url service env_file; do
+  while IFS=$'\x1f' read -r id port prefix url service env_file; do
     [[ -n "$id" ]] || continue
     found=1
     local state="未知"
