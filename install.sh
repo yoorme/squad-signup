@@ -659,18 +659,18 @@ select_instance_interactive() {
 }
 
 prompt_instance_id() {
-  local val="${INSTANCE_ID:-}"
+  local instance_id_input="${INSTANCE_ID:-}"
   while true; do
-    ask val "实例标识（英文/数字/下划线/连字符，如 team-a）" "$val"
-    if [[ "$val" =~ ^[A-Za-z0-9_-]{1,32}$ ]]; then
-      INSTANCE_ID="$val"
-      INSTANCE_DIR="$INSTANCE_ROOT/$val"
+    ask instance_id_input "实例标识（英文/数字/下划线/连字符，如 team-a）" "$instance_id_input"
+    if [[ "$instance_id_input" =~ ^[A-Za-z0-9_-]{1,32}$ ]]; then
+      INSTANCE_ID="$instance_id_input"
+      INSTANCE_DIR="$INSTANCE_ROOT/$instance_id_input"
       INSTANCE_ENV="$INSTANCE_DIR/.env"
-      SERVICE_NAME="squad-signup-$val"
+      SERVICE_NAME="squad-signup-$instance_id_input"
       return 0
     fi
     warn "实例标识不合法：需 1-32 位英文/数字/下划线/连字符"
-    val=""
+    instance_id_input=""
     is_interactive || die "INSTANCE_ID 不合法"
   done
 }
