@@ -39,19 +39,20 @@
 
 ### 方式一：一键脚本（推荐，Linux 服务器）
 
-在服务器上直接运行（自动识别安装/更新）：
+在服务器上直接运行，可以在一台服务器上安装多个战队网站，共享同一份代码版本，仅数据目录、数据库和端口分离：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/install.sh | bash
 ```
 
-安装过程会依次询问：
+安装过程会先列出服务器上已存在的战队缩写，然后询问是新增网站还是重新安装已有网站；新增时依次询问：
 
-1. **PostgreSQL 连接串**（数据库需自行准备）
-2. **服务端口**（默认 3000，可自定，校验 1-65535 合法性）
-3. **战队缩写**（默认无前缀；仅输入缩写如 `XX`，系统自动拼接固定分隔符「丨」组成前缀 `XX丨`，用于登录用户名拼接与站点标题，之后可在管理后台修改）
-4. **初始管理员账户与密码**（默认 `admin` / `123456`，密码输入不回显；账户自动拼接战队前缀，登录直接用账户+密码即可）
-5. **站点 URL**（默认按服务器 IP 与所选端口生成）
+1. **实例标识**（英文/数字/下划线/连字符，用于数据目录和 systemd 服务名）
+2. **PostgreSQL 连接串**（每个实例需独立数据库或 schema，避免数据串用）
+3. **服务端口**（默认 3000，可自定，校验 1-65535 合法性）
+4. **战队缩写**（默认无前缀；仅输入缩写如 `XX`，系统自动拼接固定分隔符「丨」组成前缀 `XX丨`）
+5. **初始管理员账户与密码**（默认 `admin` / `123456`）
+6. **站点 URL**（默认按服务器 IP 与所选端口生成）
 
 管理员在安装完成时直接创建进数据库；使用默认密码 123456 会在结尾提示，登录后请立即修改。
 
@@ -94,17 +95,13 @@ Fork 后导入，在 Settings → Environment Variables 配置环境变量（`DA
 
 ## 更新
 
-服务器上执行（与安装是同一条命令，已有配置会被保留，不会再询问任何问题）：
+安装脚本 `install.sh` 负责新增/重装实例；更新所有实例请使用 `update.sh`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/update.sh | bash
 ```
 
-或使用独立的更新脚本（功能等价，仅更新不安装）：
-
-```bash
-bash update.sh
-```
+`update.sh` 会下载最新共享运行时，并逐个实例执行数据库迁移、重建 systemd 服务并重启；各实例 `.env`、上传图片和数据库数据不会被清除。
 
 更新过程说明：
 
@@ -183,8 +180,8 @@ squad-signup/
 │   │   └── ui/                # 通用 UI（Toast、Modal、Markdown 等）
 │   ├── lib/                   # 工具函数（prisma、auth、site-settings 等）
 │   └── auth.ts                # NextAuth 配置
-├── install.sh                 # 一键安装/更新脚本
-├── update.sh                  # 更新脚本（预构建产物模式）
+├── install.sh                 # 新增/重装战队网站（多实例管理）
+├── update.sh                  # 更新所有已安装实例到最新版本
 ├── deploy.sh                  # Docker 部署脚本
 └── docker-compose.yml
 ```
