@@ -35,7 +35,7 @@
 
 ## 安装
 
-系统**不预置任何默认账号**：首次打开站点时，登录页会显示「系统初始化」表单，在那里创建初始管理员账户。
+系统**不预置任何默认账号**：推荐用下方一键脚本安装，在安装过程中于终端直接创建初始管理员（默认 `admin` / `123456`）；若安装时未创建，首次打开站点时登录页会显示「系统初始化」表单，在那里创建初始管理员账户。
 
 ### 方式一：一键脚本（推荐，Linux 服务器）
 
@@ -50,9 +50,12 @@ curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/install.sh
 1. **PostgreSQL 连接串**（数据库需自行准备）
 2. **服务端口**（默认 3000，可自定，校验 1-65535 合法性）
 3. **战队名称前缀**（默认无前缀，用于登录用户名拼接与站点标题，之后可在管理后台修改）
-4. **站点 URL**（默认按服务器 IP 与所选端口生成）
+4. **初始管理员账户与密码**（默认 `admin` / `123456`，密码输入不回显；账户自动拼接战队前缀，登录直接用账户+密码即可）
+5. **站点 URL**（默认按服务器 IP 与所选端口生成）
 
-完成后用 `systemctl status squad-signup` 查看状态，浏览器打开站点完成管理员初始化。
+管理员在安装完成时直接创建进数据库；使用默认密码 123456 会在结尾提示，登录后请立即修改。
+
+完成后用 `systemctl status squad-signup` 查看状态。
 
 非交互自动化部署：
 
@@ -60,6 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/yoorme/squad-signup/main/install.sh
 DATABASE_URL=... DIRECT_URL=... NEXTAUTH_URL=https://... \
   NONINTERACTIVE=1 bash install.sh
 # 可选：PORT=8080 TEAM_PREFIX=XX丨
+#       ADMIN_NICKNAME=admin ADMIN_PASSWORD=你的密码（不填则用默认 admin/123456）
 ```
 
 ### 方式二：Docker Compose
@@ -107,7 +111,7 @@ bash update.sh
 - `.env`、上传的图片与自定义战队图标全部保留，不会丢失
 - 数据库结构变更通过 `prisma migrate deploy` 自动应用
 - 存量部署的战队名称前缀由迁移从历史用户名自动推导写入，无需手动处理
-- 国内服务器下载慢可加镜像前缀：`MIRROR_URL=https://ghproxy.com/ bash update.sh`
+- 下载源自动优选：内置 6 个 GitHub 加速镜像 + 原生地址，每次安装/更新先并行测速、自动选最快的源下载，失败自动切换下一个（无需手动配置；也可用 `MIRROR_URL=...` 追加自选镜像候选）
 
 ### 更新中断了怎么办
 
@@ -135,7 +139,7 @@ bash update.sh
 | `TEAM_PREFIX` | 战队名称前缀（首次 seed 时写入数据库，默认空 = 无前缀） |
 | `UPLOAD_DIR` | 上传文件持久目录（默认 `<安装目录>/uploads`） |
 
-初始管理员不在环境变量中配置，见上文「系统初始化」。
+初始管理员由 install.sh 首次安装时在终端创建（默认 `admin` / `123456`，可用 `ADMIN_NICKNAME` / `ADMIN_PASSWORD` 环境变量覆盖）；若安装时未创建（如旧版本升级上来），首次访问站点会进入「系统初始化」页面创建。
 
 ## 默认种子数据
 

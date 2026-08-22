@@ -18,10 +18,12 @@ MIRROR_URL="${MIRROR_URL:-}"
 TMP_TAR=""
 TMP_EXTRACT=""
 TMP_ENV_BACKUP=""
+PROBE_DIR=""
 cleanup() {
   [[ -n "$TMP_TAR" && -f "$TMP_TAR" ]] && rm -f "$TMP_TAR"
   [[ -n "$TMP_EXTRACT" && -d "$TMP_EXTRACT" ]] && rm -rf "$TMP_EXTRACT"
   [[ -n "$TMP_ENV_BACKUP" && -f "$TMP_ENV_BACKUP" ]] && rm -f "$TMP_ENV_BACKUP"
+  [[ -n "$PROBE_DIR" && -d "$PROBE_DIR" ]] && rm -rf "$PROBE_DIR"
 }
 trap cleanup EXIT
 
@@ -75,13 +77,66 @@ echo "✓ 服务已停止"
 echo "▶ 2/5 下载预构建产物..."
 TMP_TAR="/tmp/squad-signup-dist-$$.tar.gz"
 
-# 构建下载源列表：若配置了镜像则优先用镜像，原生 GitHub 始终作为兜底
+# ---------------- 下载源自动测速 ----------------
+# 内置多个 GitHub 加速镜像 + 原生地址，并行测速后按速度排序下载（失败自动切换）
+# 镜像可用性随时间变化，因此每次更新都重新测速，不持久化固定选择
+GITHUB_MIRRORS=(
+  "https://ghfast.top/"
+  "https://gh-proxy.com/"
+  "https://ghproxy.net/"
+  "https://ghproxy.cn/"
+  "https://github.moeyy.xyz/"
+  "https://gh.ddlc.top/"
+)
+
+# 候选前缀 = MIRROR_URL（优先）+ 内置镜像 + 原生兜底
+PREFIXES=()
+[[ -n "$MIRROR_URL" ]] && PREFIXES+=("${MIRROR_URL%/}/")
+for m in "${GITHUB_MIRRORS[@]}"; do
+  [[ "${MIRROR_URL%/}/" == "$m" ]] || PREFIXES+=("$m")
+done
+PREFIXES+=("")
+
+echo "▶ 测速选择下载源（${#PREFIXES[@]} 个候选，并行探测）..."
+PROBE_DIR=$(mktemp -d)
+URLS=()
+idx=0
+for pfx in "${PREFIXES[@]}"; do
+  url="${pfx}${DIST_URL}"
+  URLS+=("$url")
+  (
+    t=$(curl -fsS -o /dev/null -w '%{time_total}' \
+          --connect-timeout 4 --max-time 8 -r 0-1023 "$url" 2>/dev/null) || t="999.999"
+    printf '%s' "${t:-999.999}" > "$PROBE_DIR/$idx"
+  ) &
+  idx=$((idx + 1))
+done
+wait
+
+# 汇总测速结果并按耗时排序（数值升序；999.999 = 不可达，自然排最后）
+PROBE_RESULT="$PROBE_DIR/result"
+: > "$PROBE_RESULT"
+idx=0
+for url in "${URLS[@]}"; do
+  t=$(cat "$PROBE_DIR/$idx" 2>/dev/null || true)
+  [[ -z "$t" ]] && t="999.999"
+  printf '%s %s\n' "$t" "$url" >> "$PROBE_RESULT"
+  idx=$((idx + 1))
+done
+
 DOWNLOAD_URLS=()
-if [[ -n "$MIRROR_URL" ]]; then
-  mirror="${MIRROR_URL%/}"
-  DOWNLOAD_URLS+=("${mirror}/${DIST_URL}")
-fi
-DOWNLOAD_URLS+=("$DIST_URL")
+while read -r t url; do
+  [[ -z "${url:-}" ]] && continue
+  DOWNLOAD_URLS+=("$url")
+  name=${url#https://}; name=${name%%/*}
+  if [[ "$t" == "999.999" ]]; then
+    echo "  ✗ $name 不可达"
+  else
+    echo "  ✓ $name ${t}s"
+  fi
+done < <(LC_ALL=C sort -k1,1g "$PROBE_RESULT")
+rm -rf "$PROBE_DIR"; PROBE_DIR=""
+echo "✓ 已按测速结果确定下载顺序（最快源优先，失败自动切换下一个）"
 
 download_ok=false
 i=1
@@ -99,11 +154,11 @@ for url in "${DOWNLOAD_URLS[@]}"; do
 done
 
 if [[ "$download_ok" != "true" ]]; then
-  echo "✗ 下载失败。可能原因："
+  echo "✗ 下载失败（已自动测速并依次尝试全部源）。可能原因："
   echo "  1. GitHub Actions 还在构建中（查看：https://github.com/${REPO}/actions）"
-  echo "  2. 网络问题——国内服务器可设置镜像加速："
-  echo "     MIRROR_URL=https://ghproxy.com/ bash update.sh"
-  echo "  3. 镜像不可用——已自动回退 GitHub 原生仍失败"
+  echo "  2. 网络问题——稍后重试，或指定其他镜像候选："
+  echo "     MIRROR_URL=https://你熟悉的镜像前缀/ bash update.sh"
+  echo "  3. 所有内置镜像与 GitHub 原生均不可达"
   # 自动恢复：旧版本文件未受影响，尝试直接把旧版启动回来，站点不中断
   if [[ -f "$INSTALL_DIR/standalone/server.js" ]]; then
     echo "  正在尝试恢复启动旧版本..."

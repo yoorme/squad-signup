@@ -23,7 +23,10 @@
 #     可选：PORT=8080（服务端口，默认 3000）
 #           TEAM_PREFIX=XX丨（战队名称前缀，默认空 = 无前缀，
 #           首次安装时写入数据库，之后在管理后台「战队管理」中修改）
-#     注意：不创建任何默认账户；初始管理员在首次访问登录页时创建
+#           ADMIN_NICKNAME=admin（初始管理员账户，默认 admin）
+#           ADMIN_PASSWORD=xxx（初始管理员密码，默认 123456）
+#     下载源：内置多个 GitHub 加速镜像 + 原生地址，自动并行测速选最快的，
+#           失败自动切换下一个；也可用 MIRROR_URL 指定额外的镜像候选
 # ============================================================================
 
 set -euo pipefail
@@ -33,10 +36,12 @@ set -euo pipefail
 TMP_TAR=""
 TMP_EXTRACT=""
 TMP_ENV_BACKUP=""
+TMP_PROBE_DIR=""
 cleanup() {
   [[ -n "$TMP_TAR" && -f "$TMP_TAR" ]] && rm -f "$TMP_TAR"
   [[ -n "$TMP_EXTRACT" && -d "$TMP_EXTRACT" ]] && rm -rf "$TMP_EXTRACT"
   [[ -n "$TMP_ENV_BACKUP" && -f "$TMP_ENV_BACKUP" ]] && rm -f "$TMP_ENV_BACKUP"
+  [[ -n "$TMP_PROBE_DIR" && -d "$TMP_PROBE_DIR" ]] && rm -rf "$TMP_PROBE_DIR"
   return 0
 }
 trap cleanup EXIT
@@ -88,6 +93,18 @@ ask() {
   if is_interactive; then
     printf "%s?%s %s%s [%s]:%s " "$C_CYAN" "$C_RESET" "$C_BOLD" "$msg" "$def" "$C_RESET" >&2
     IFS= read -r val </dev/tty || true
+  fi
+  [[ -z "$val" ]] && val="$def"
+  printf -v "$var" '%s' "$val"
+}
+
+# 隐藏输入（用于密码）：输入不回显，直接回车 = 使用默认值
+ask_secret() {
+  local var="$1" msg="$2" def="${3:-}" val=""
+  if is_interactive; then
+    printf "%s?%s %s%s [%s]:%s " "$C_CYAN" "$C_RESET" "$C_BOLD" "$msg" "$def" "$C_RESET" >&2
+    IFS= read -rs val </dev/tty || true
+    printf '\n' >&2
   fi
   [[ -z "$val" ]] && val="$def"
   printf -v "$var" '%s' "$val"
@@ -202,22 +219,86 @@ ensure_base_tools() {
 }
 
 # ---------------- 下载预构建产物 ----------------
+# 内置 GitHub 加速镜像候选（URL 前缀代理：镜像 + https://github.com/...）
+# 镜像可用性随时间变化，因此每次下载前先并行测速、自动选最快的源
+GITHUB_MIRRORS=(
+  "https://ghfast.top/"
+  "https://gh-proxy.com/"
+  "https://ghproxy.net/"
+  "https://ghproxy.cn/"
+  "https://github.moeyy.xyz/"
+  "https://gh.ddlc.top/"
+)
+
+# 并行测速所有候选源（各下载首 1KB 计时），结果写入 SPEED_URLS（快 → 慢）
+# 候选 = 用户配置的 MIRROR_URL（优先）+ 内置镜像 + GitHub 原生（兜底）
+# 探测失败的源排在最后（探测用 Range 请求，个别不支持 Range 的镜像可能被
+# 误判，但下载循环仍会按顺序尝试它们，不会真正丢失候选）
+probe_sources() {
+  local -a prefixes=()
+  if [[ -n "$MIRROR_URL" ]]; then
+    prefixes+=("${MIRROR_URL%/}/")
+  fi
+  local mir
+  for mir in "${GITHUB_MIRRORS[@]}"; do
+    [[ "${MIRROR_URL%/}/" == "$mir" ]] || prefixes+=("$mir")
+  done
+  prefixes+=("")  # 空前缀 = GitHub 原生
+
+  log "测速选择下载源（${#prefixes[@]} 个候选，并行探测）..."
+  TMP_PROBE_DIR=$(mktemp -d)
+  local -a urls=()
+  local i=0 pfx url
+  for pfx in "${prefixes[@]}"; do
+    url="${pfx}${DIST_URL}"
+    urls+=("$url")
+    (
+      t=$(curl -fsS -o /dev/null -w '%{time_total}' \
+            --connect-timeout 4 --max-time 8 -r 0-1023 "$url" 2>/dev/null) || t="999.999"
+      printf '%s' "${t:-999.999}" > "$TMP_PROBE_DIR/$i"
+    ) &
+    i=$((i + 1))
+  done
+  wait
+
+  # 汇总测速结果并按耗时排序（数值升序；999.999 = 不可达，自然排最后）
+  local result_file="$TMP_PROBE_DIR/result"
+  : > "$result_file"
+  i=0
+  for url in "${urls[@]}"; do
+    local t
+    t=$(cat "$TMP_PROBE_DIR/$i" 2>/dev/null || true)
+    [[ -z "$t" ]] && t="999.999"
+    printf '%s %s\n' "$t" "$url" >> "$result_file"
+    i=$((i + 1))
+  done
+
+  SPEED_URLS=()
+  local name
+  while read -r t url; do
+    [[ -z "${url:-}" ]] && continue
+    SPEED_URLS+=("$url")
+    name=${url#https://}; name=${name%%/*}
+    if [[ "$t" == "999.999" ]]; then
+      printf "  %s✗%s %-22s 不可达\n" "$C_RED" "$C_RESET" "$name" >&2
+    else
+      printf "  %s✓%s %-22s %ss\n" "$C_GREEN" "$C_RESET" "$name" "$t" >&2
+    fi
+  done < <(LC_ALL=C sort -k1,1g "$result_file")
+  rm -rf "$TMP_PROBE_DIR"; TMP_PROBE_DIR=""
+  ok "已按测速结果确定下载顺序（最快源优先，失败自动切换下一个）"
+}
+
 # 从 GitHub Release 下载 dist.tar.gz 并解压
 # dist.tar.gz 内含 standalone/（运行时）+ prisma/（迁移用）
-# 下载策略：若配置了 MIRROR_URL 则优先用镜像，失败自动回退 GitHub 原生
+# 下载策略：先测速排序（probe_sources），再按顺序尝试，全部失败才报错
 download_dist() {
   local out="$1"
-  local urls=()
-  if [[ -n "$MIRROR_URL" ]]; then
-    # 镜像前缀拼接（去掉末尾斜杠防重复）
-    local mirror="${MIRROR_URL%/}"
-    urls+=("${mirror}/${DIST_URL}")
-  fi
-  urls+=("$DIST_URL")  # 始终把原生 GitHub 作为兜底
+  [[ -n "${SPEED_URLS[*]:-}" ]] || probe_sources
 
-  local i=1
-  for url in "${urls[@]}"; do
-    log "下载（第 $i/${#urls[@]} 个源）：$url"
+  local i=1 url
+  for url in "${SPEED_URLS[@]}"; do
+    log "下载（第 $i/${#SPEED_URLS[@]} 个源）：$url"
     if curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o "$out" && [[ -s "$out" ]]; then
       ok "下载成功（来源：$url）"
       return 0
@@ -267,9 +348,9 @@ fetch_dist() {
   if ! download_dist "$TMP_TAR"; then
     die "下载产物失败。可能原因：
   1. GitHub Actions 还在构建中（查看：https://github.com/${REPO}/actions）
-  2. 网络问题——国内服务器可设置镜像加速：
-     MIRROR_URL=https://ghproxy.com/ bash install.sh
-  3. 镜像不可用——已自动回退 GitHub 原生仍失败
+  2. 网络问题——稍后重试，或指定其他镜像候选：
+     MIRROR_URL=https://你熟悉的镜像前缀/ bash install.sh
+  3. 所有内置镜像与 GitHub 原生均不可达
   （旧版本文件未受影响，可继续运行当前版本，稍后重试更新）"
   fi
 
@@ -389,6 +470,45 @@ EOF
   fi
   ask team_prefix "战队名称前缀（回车=无前缀）" "$team_prefix"
 
+  # 初始管理员：首次部署时在终端直接创建（迁移完成后写入数据库）
+  # 默认账户 admin、默认密码 123456；密码不写入 .env（不落盘）
+  ADMIN_NICKNAME="${ADMIN_NICKNAME:-admin}"
+  ADMIN_PASSWORD="${ADMIN_PASSWORD:-123456}"
+  if is_interactive; then
+    cat >&2 <<EOF
+
+${C_BOLD}初始管理员账户${C_RESET}
+登录用「昵称」，系统自动拼接战队前缀组成完整用户名。
+账户默认 admin、密码默认 123456（弱密码仅作占位，登录后请立即修改）。
+
+EOF
+  fi
+  while true; do
+    ask ADMIN_NICKNAME "初始管理员账户（回车=admin）" "$ADMIN_NICKNAME"
+    local nick="$ADMIN_NICKNAME"
+    if [[ "$nick" =~ ^[^[:space:]]{1,16}$ ]]; then
+      if [[ -n "$team_prefix" && "$nick" == "$team_prefix"* ]]; then
+        warn "账户无需包含战队前缀「$team_prefix」（系统会自动拼接）"
+      else
+        break
+      fi
+    else
+      warn "账户不合法：需 1-16 个字符且不含空白"
+    fi
+    ADMIN_NICKNAME="admin"
+    is_interactive || die "ADMIN_NICKNAME 不合法（需 1-16 个字符、不含空白）"
+  done
+  while true; do
+    ask_secret ADMIN_PASSWORD "初始管理员密码（回车=123456）" "$ADMIN_PASSWORD"
+    local pw="$ADMIN_PASSWORD"
+    if (( ${#pw} >= 6 && ${#pw} <= 64 )); then
+      break
+    fi
+    warn "密码不合法：需 6-64 个字符"
+    ADMIN_PASSWORD="123456"
+    is_interactive || die "ADMIN_PASSWORD 不合法（需 6-64 个字符）"
+  done
+
   if [[ -z "$auth_secret" ]]; then
     auth_secret=$(openssl rand -base64 32)
     ok "已自动生成 AUTH_SECRET"
@@ -462,6 +582,50 @@ run_migrate() {
   ./node_modules/.bin/prisma migrate deploy
   ./node_modules/.bin/tsx prisma/seed.ts
   ok "迁移完成"
+}
+
+# ---------------- 初始管理员（终端创建） ----------------
+# 首次安装时由终端询问账户/密码（configure_env），迁移完成后写入数据库。
+# 密码不落盘（仅安装过程内存传递）；库中已有用户则跳过（幂等，重跑安全）。
+create_initial_admin() {
+  if [[ -z "${ADMIN_NICKNAME:-}" ]]; then
+    warn "未设置初始管理员账户，首次访问站点时请通过「系统初始化」页面创建"
+    return 0
+  fi
+  cd "$INSTALL_DIR" || die "无法进入 $INSTALL_DIR"
+  set -a; . "$INSTALL_DIR/.env"; set +a
+  log "创建初始管理员..."
+  ADMIN_NICKNAME="$ADMIN_NICKNAME" ADMIN_PASSWORD="$ADMIN_PASSWORD" node <<'JS' || die "创建初始管理员失败"
+const { PrismaClient } = require("@prisma/client");
+const bcrypt = require("bcryptjs");
+(async () => {
+  const prisma = new PrismaClient();
+  try {
+    const count = await prisma.user.count();
+    if (count > 0) {
+      console.log("✓ 数据库已有用户，跳过初始管理员创建");
+      return;
+    }
+    const nickname = (process.env.ADMIN_NICKNAME || "").trim();
+    const password = process.env.ADMIN_PASSWORD || "";
+    const prefix = process.env.TEAM_PREFIX || "";
+    if (!nickname || password.length < 6 || password.length > 64) {
+      console.error("✗ 管理员账户或密码不合法");
+      process.exit(1);
+    }
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({
+      data: { username: prefix + nickname, nickname, passwordHash, role: "ADMIN" },
+    });
+    console.log(`✓ 初始管理员已创建：${user.username}`);
+  } finally {
+    await prisma.$disconnect();
+  }
+})().catch((e) => {
+  console.error("✗ " + e.message);
+  process.exit(1);
+});
+JS
 }
 
 # ---------------- 服务管理 ----------------
@@ -593,41 +757,18 @@ start_service() {
 }
 
 # ---------------- 安装 / 更新主流程 ----------------
-# 询问国内加速镜像（仅交互模式 + 未配置时）
-# 国内服务器从 GitHub Release 下载产物可能很慢或超时，配置镜像可大幅加速
-ask_mirror() {
-  # 已通过环境变量或 .deploy.conf 配置则跳过
-  [[ -n "$MIRROR_URL" ]] && return 0
-  if is_interactive; then
-    cat >&2 <<EOF
-
-${C_BOLD}国内服务器加速（可选）${C_RESET}
-GitHub Release 下载在国内可能很慢，可配置镜像加速（如 https://ghproxy.com/）。
-留空则直接用 GitHub 原生地址，下载失败时也会自动回退。
-
-EOF
-    local val=""
-    printf "%s?%s %s国内加速镜像前缀（回车=跳过）%s [%s]:%s " \
-      "$C_CYAN" "$C_RESET" "$C_BOLD" "$C_RESET" "跳过" "$C_RESET" >&2
-    IFS= read -r val </dev/tty || true
-    if [[ -n "$val" ]]; then
-      MIRROR_URL="${val%/}/"
-      ok "已设置镜像：$MIRROR_URL"
-    else
-      ok "不使用镜像，直接用 GitHub 原生"
-    fi
-  fi
-}
+# 下载源不再手动询问：内置多个镜像 + 原生地址，每次自动并行测速选最快源
+# （MIRROR_URL 环境变量仍可指定额外语速候选，优先参与测速）
 
 do_install() {
   log "${C_BOLD}安装 squad-signup（预构建产物模式）${C_RESET}"
   ensure_base_tools
   ensure_node
-  ask_mirror
   fetch_dist
   load_deploy_conf
   configure_env
   run_migrate
+  create_initial_admin
   chown_install_dir
   if has_systemd; then setup_systemd; else setup_nohup; fi
   start_service
@@ -740,9 +881,14 @@ ${C_GREEN}${C_BOLD}✓ squad-signup 安装完成${C_RESET}
   目录：$INSTALL_DIR
   端口：$port
   站点：${NEXTAUTH_URL:-http://$(server_ip):$port}
-
-  首次使用：打开站点后会进入「系统初始化」页面，
-  在那里创建初始管理员账户（不预置任何默认账号密码）。
+  初始管理员：${TEAM_PREFIX:-}${ADMIN_NICKNAME:-（未创建，首次访问站点时通过「系统初始化」页面创建）}
+EOF
+  if [[ "${ADMIN_PASSWORD:-}" == "123456" ]]; then
+    cat >&2 <<EOF
+${C_YELLOW}  ! 当前使用默认密码 123456，请登录后立即在「个人设置」中修改！${C_RESET}
+EOF
+  fi
+  cat >&2 <<EOF
 
 EOF
   if has_systemd; then
